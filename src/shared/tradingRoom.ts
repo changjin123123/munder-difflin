@@ -41,11 +41,21 @@ export interface Meeting {
   evidence?: Evidence; speaking: Step[]; answers: Partial<Record<Step,Answer>>;
   sessionId?:string; finishedAt?:number;
   method?:'tradingagents-office-v1'; proposal?:Proposal;
+  scan?:MarketScan;
+}
+export interface MarketCandidate {
+  venue:Venue; symbol:string; change:number; turnover:number; turnoverRank:number; moveRank:number;
+}
+export interface MarketScan {
+  at:number;
+  venues:{venue:Venue; listed:number; eligible:number; issue?:string}[];
+  candidates:MarketCandidate[];
 }
 export const repeatMinutes = [5,15,30,60] as const;
 export const repeatLimits = [2,3,4,6] as const;
 export interface PaperSession {
-  id:string; venue:Venue; symbol:string; engine:Engine; minutes:number; limit:number;
+  id:string; venue?:Venue; symbol?:string; engine:Engine; minutes:number; limit:number;
+  scope?:'market'; scan?:MarketScan;
   created:number; state:'running'|'waiting'|'done'|'stopped'|'error'; nextAt:number|null;
   reason:string; meetings:string[]; approved:number; held:number;
 }

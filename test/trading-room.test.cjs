@@ -14,8 +14,11 @@ function fixture(options={}) {
   const steps=[];
   const objectives={};
   const quote=()=>({bid:market,ask:market+.02,at:Date.now()/1000,until:Date.now()/1000+8});
-  const source=async(path,{venue,symbol})=>{
+  const source=async(path,params)=>{
+    const {venue,symbol}=params;
+    if(path==='markets') return options.catalog(params);
     if (path==='room/evidence') {
+      if(options.badEvidence===symbol) throw new Error('호가 없음');
       const news=options.noNews?[]:['N1','N2'].map((id,i)=>({id,source:'CoinDesk',title:'합성 테스트 '+id,
         url:options.badUrl?'https://coindesk.com.example.org/a':'https://www.coindesk.com/test/'+i,
         summary:'공개 요약 테스트',scope:'asset',publishedAt:Date.now()/1000-(options.staleNews?86401:60)}));
@@ -56,6 +59,62 @@ roomTest('13 seats, a real rebuttal stage, isolated paper balances and exactly-o
   const expected=closed.qty*(closed.exit-closed.entry-.0005*(closed.entry+closed.exit));
   assert.equal(closed.pnl,expected);
   assert.equal(f.room.view().totals.find(t=>t.venue==='bingx').cash,1000+expected);
+});
+
+function board(rows,venue,offset) {
+  const listed=rows.map(([coin,volume,change,eligible=true,age=0])=>({
+    venue,symbol:venue==='bithumb'?'KRW-'+coin:coin+'-USDT',price:100,turnover_24h:volume,
+    change_pct:change,paper_eligible:eligible,quoted_at:new Date(Date.now()-age).toISOString()
+  }));
+  return {total:listed.length,offset:Number(offset),sources:{[venue]:'snapshot'},items:listed.slice(Number(offset),Number(offset)+100)};
+}
+roomTest('market sessions re-scan each round, balance venues, debate peers and book separate assets',async t=>{
+  const pages=[];
+  const catalog=({venue,offset})=>{
+    pages.push([venue,offset]);
+    const rows=[['BTC',200,0.01],['ETH',300,4],['SOL',250,3],['DROP',900,9,false],['STALE',900,9,true,600000]];
+    for(let i=0;i<100;i++) rows.push(['X'+i,1,0]);
+    rows.push(['DEEP',400,5]);
+    return board(rows,venue,offset);
+  };
+  const f=fixture({catalog});t.after(()=>f.room.stop());
+  assert.throws(()=>f.room.startMarket('codex',0,500));
+  f.room.startMarket('codex',0,3);
+  assert.throws(()=>f.room.start('bingx','BTC-USDT','codex'));
+  for(let i=0;i<100 && f.room.view().session.state!=='done';i++) await delay(3);
+  const v=f.room.view();
+  assert.equal(v.session.state,'done');assert.equal(v.trades.length,3);
+  const all=v.session.meetings.map(id=>f.room.view(id).current);
+  const coin=m=>m.symbol.split('-')[m.venue==='bithumb'?1:0];
+  assert.deepEqual(all.map(coin),['DEEP','ETH','SOL']);assert.notEqual(all[0].venue,all[1].venue);
+  assert.equal(all.length,3);assert.equal(f.steps.length,42);
+  assert.deepEqual(all[0].scan.venues.map(x=>[x.listed,x.eligible]),[[106,104],[106,104]]);
+  assert.equal(pages.filter(([,offset])=>offset==='100').length,6);
+  assert.ok(f.objectives.bull.includes('전 종목 회의의 비교 자료'));
+  assert.ok(f.objectives.bear.includes(all[2].scan.candidates[1].symbol));
+  assert.ok(all.every(m=>m.scan.candidates[0].symbol===m.symbol));
+  f.room.startMarket('codex',0,1);
+  for(let i=0;i<50 && f.room.view().session.state!=='done';i++) await delay(2);
+  assert.ok(!all.map(coin).includes(coin(f.room.view().current)));
+});
+roomTest('a missing venue and an unavailable instrument leave no fill and advance to the next eligible coin',async t=>{
+  const catalog=({venue,offset})=>{
+    if(venue==='bingx') throw Error('offline');
+    return board([['ADA',90,4],['ETH',50,3]],venue,offset);
+  };
+  const f=fixture({catalog,badEvidence:'KRW-ADA'});t.after(()=>f.room.stop());
+  f.room.startMarket('codex',0,3);
+  for(let i=0;i<50 && f.room.view().session.state!=='done';i++) await delay(3);
+  const v=f.room.view();assert.equal(v.session.state,'done');assert.equal(v.session.held,1);
+  assert.equal(v.session.meetings.length,2);assert.equal(v.trades.length,1);assert.equal(v.trades[0].symbol,'KRW-ETH');
+  assert.equal(v.current.scan.venues.find(x=>x.venue==='bingx').issue,'offline');assert.equal(f.steps.length,14);
+});
+roomTest('stopping a market scan discards late pages and never calls an engine',async t=>{
+  const resolvers=[];
+  const f=fixture({catalog:p=>new Promise(resolve=>resolvers.push(()=>resolve(board([['ETH',10,1]],p.venue,p.offset))))});
+  t.after(()=>f.room.stop());f.room.startMarket('codex',0,2);f.room.stopAuto();resolvers.forEach(fn=>fn());
+  await new Promise(r=>setImmediate(r));const v=f.room.view();
+  assert.equal(v.session.state,'stopped');assert.equal(v.current,null);assert.equal(f.steps.length,0);
 });
 roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create paper entries',async t=>{
   for (const [opts,venue,state] of [[{veto:'defense'},'bingx','hold'],[{malformed:'technical'},'bingx','error'],

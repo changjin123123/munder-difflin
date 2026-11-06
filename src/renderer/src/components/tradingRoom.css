@@ -10,3 +10,8 @@
 .rm-news a,.rm-citations a{color:#b4e4c6}.rm-citations{display:inline-flex;flex-wrap:wrap;gap:6px}
 .rm-citations a{font-size:11px;text-decoration:underline;text-underline-offset:2px;padding:1px 4px}
 .rm-review{margin:14px 0;border-left:3px solid #8fba9e;padding:4px 14px}.rm-review p{font-size:13px;margin:6px 0}
+.rm-market-run,.rm-agenda{margin:14px 0;padding:12px 16px;background:#1b2c2a;border:1px solid #47584b;border-radius:5px}
+.rm-market-run{font-size:14px}.rm-market-run button{margin:6px 5px 0 0}
+.rm-agenda p,.rm-agenda small,.rm-agenda li span{color:#bdcbc2;font-size:12px}
+.rm-agenda ol{margin:8px 0;padding:0;list-style:none}.rm-agenda li{display:flex;flex-wrap:wrap;gap:4px 12px;padding:5px 0;border-bottom:1px solid #3a4e4a}
+.rm-agenda li:first-child strong{color:#f1ce7c}

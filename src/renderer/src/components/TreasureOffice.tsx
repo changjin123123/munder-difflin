@@ -86,7 +86,7 @@ function Desk({page,setPage}:{page:DeskPage;setPage:(p:DeskPage)=>void}) {
     {page!=='room' && (error || controlError) && <div role="alert" className="tb-error">{controlError || error} <button onClick={()=>refresh(n=>n+1)}>다시 조회</button></div>}
     {page!=='room' && <nav className="tb-tabs" aria-label="보물공방 화면">{(['markets','news','results','room'] as const).map((key,i)=>
       <button key={key} aria-pressed={page===key} onClick={()=>setPage(key)}>{['전체 시세','최신 뉴스','모의 장부','트레이딩 회의실'][i]}</button>)}</nav>}
-    {page==='room' && <TradingRoomPanel initialVenue={venue} initialSymbol={meetingSymbol || (venue==='bithumb'?'KRW-BTC':'BTC-USDT')}/>}
+    {page==='room' && <TradingRoomPanel initialVenue={venue} initialSymbol={meetingSymbol}/>}
     {page==='markets' && <>
       <div className="tb-filters"><select aria-label="거래소" value={venue} onChange={e=>{setOffset(0);setMeetingSymbol('');setVenue(e.target.value as Venue);}}>
         <option value="bithumb">빗썸 · KRW</option><option value="bingx">빙엑스 · USDT</option></select>

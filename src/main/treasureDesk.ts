@@ -85,7 +85,8 @@ export function registerTreasureDesk(allowed: () => WebContents | null, workers:
   ipcMain.handle('treasure:meeting',async(event,action:string,args:Record<string,string>={})=>{
     if (!room || event.sender!==allowed() || event.senderFrame!==event.sender.mainFrame ||
         !args || typeof args!=='object' || Object.values(args).some(v=>typeof v!=='string'||v.length>100)) throw new Error('허용되지 않은 회의 요청입니다.');
-    if (action==='start') room.start(args.venue as Venue,args.symbol,args.engine as Engine);
+    if (action==='marketStart') room.startMarket(args.engine as Engine,Number(args.minutes),Number(args.limit));
+    else if (action==='start') room.start(args.venue as Venue,args.symbol,args.engine as Engine);
     else if (action==='autoStart') room.startAuto(args.venue as Venue,args.symbol,args.engine as Engine,Number(args.minutes),Number(args.limit));
     else if (action==='autoStop') room.stopAuto();
     else if (action==='cancel') room.cancel();

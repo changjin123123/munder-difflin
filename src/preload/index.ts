@@ -568,7 +568,7 @@ export interface PreservedWorktreeSnapshot {
 
 const api = {
   treasureAvailable: (): Promise<boolean> => ipcRenderer.invoke('treasure:available'),
-  tradingMeeting: (action:'start'|'cancel'|'view'|'close'|'autoStart'|'autoStop',args:Record<string,string>={}):Promise<RoomView> =>
+  tradingMeeting: (action:'marketStart'|'start'|'cancel'|'view'|'close'|'autoStart'|'autoStop',args:Record<string,string>={}):Promise<RoomView> =>
     ipcRenderer.invoke('treasure:meeting',action,args),
   treasureRequest: <T extends TreasurePath>(path: T, params: MarketQuery = {}): Promise<TreasureData[T]> =>
     ipcRenderer.invoke('treasure:request', path, params),
