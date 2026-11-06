@@ -4,8 +4,8 @@ import { basename, isAbsolute, join } from 'node:path';
 import { citesNews, roleFor, seats, type Engine, type Step } from '../shared/tradingRoom';
 import { choices, type RoomWorkers } from './tradingRoom';
 
-interface Job {run:string; step:Step; engine:Engine; objective:string; queued:boolean; child?:ChildProcess;
-  resolve:(s:string)=>void; reject:(e:Error)=>void; timer:ReturnType<typeof setTimeout>}
+interface Job {run:string; step:Step|'postmortem'; engine:Engine; objective:string; priority:boolean;queued:boolean; child?:ChildProcess;
+  resolve:(s:string)=>void; reject:(e:Error)=>void; timer?:ReturnType<typeof setTimeout>}
 
 export class RoomWorkerPool implements RoomWorkers {
   private jobs=new Map<string,Job>();
@@ -32,11 +32,10 @@ export class RoomWorkerPool implements RoomWorkers {
     }
     return this.detected;
   }
-  ask(run:string,step:Step,engine:Engine,objective:string) {
+  ask(run:string,step:Step|'postmortem',engine:Engine,objective:string,priority=false) {
     const id='room-'+run+'-'+step;
     return new Promise<string>((resolve,reject)=>{
-      const timer=setTimeout(()=>{this.jobs.get(id)?.child?.kill();this.end(id,undefined,'응답 시간 초과 · 에이전트 로그인을 확인하세요.');this.kill('worker-'+id);},12*60000);
-      this.jobs.set(id,{run,step,engine,objective,queued:true,resolve,reject,timer});
+      this.jobs.set(id,{run,step,engine,objective,priority,queued:true,resolve,reject});
     });
   }
   end(id:string,body?:string,error='작업자가 결과를 보내기 전에 종료됐습니다.') {
@@ -54,11 +53,11 @@ export class RoomWorkerPool implements RoomWorkers {
     const exe=this.codexPath();
     if (!exe) throw new Error('Codex 실행 파일이 없습니다.');
     const schema=join(cwd,'schema.json'), output=join(cwd,'answer.json');
-    const properties:Record<string,object>={verdict:{type:'string',enum:choices(job.step)},note:{type:'string'},
+    const properties:Record<string,object>=job.step==='postmortem'?{change:{type:'string',enum:['KEEP','SIZE','REWARD','COST']},lesson:{type:'string'}}:{verdict:{type:'string',enum:choices(job.step)},note:{type:'string'},
       line:{type:'string'},replyTo:{type:['string','null']}};
     const newsRefs={type:'array',items:{type:'string'}};
     if (job.step==='manager') properties.confidencePct={type:['integer','null'],minimum:0,maximum:100};
-    if (citesNews(job.step)) properties.newsRefs=newsRefs;
+    if (job.step!=='postmortem' && citesNews(job.step)) properties.newsRefs=newsRefs;
     if (job.step==='news') properties.newsEvents={type:'array',items:{type:'object',
       properties:{summary:{type:'string'},newsRefs},required:['summary','newsRefs'],additionalProperties:false}};
     if (job.step==='trader') {
@@ -93,17 +92,19 @@ export class RoomWorkerPool implements RoomWorkers {
   async pump(hasSlot:()=>boolean,spawn:(file:string,id:string)=>Promise<void>) {
     const root=this.root();
     if (!root) return;
-    for (const [id,job] of this.jobs) {
+    for (const [id,job] of [...this.jobs].sort((a,b)=>Number(b[1].priority)-Number(a[1].priority))) {
       if (!hasSlot()) break;
       if (!job.queued) continue;
       job.queued=false;
+      job.timer=setTimeout(()=>{this.jobs.get(id)?.child?.kill();this.end(id,undefined,'응답 시간 초과 · 에이전트 로그인을 확인하세요.');this.kill('worker-'+id);},12*60000);
       try {
         const dir=join(root,'spawn-requests','.trading-room');
         const cwd=join(root,'trading-room','work',job.run,job.step);
         mkdirSync(cwd,{recursive:true});
         if (job.engine==='codex') {this.startCodex(cwd,id,job);continue;}
         mkdirSync(dir,{recursive:true});
-        const seat=seats.find(s=>s[0]===roleFor(job.step))!;
+        const role=job.step==='postmortem'?'manager':roleFor(job.step);
+        const seat=seats.find(s=>s[0]===role)!;
         const file=join(dir,id+'.json');
         writeFileSync(file,JSON.stringify({id,objective:job.objective,cwd,name:seat[1],character:seat[2],
           provider:job.engine,isolate:false}),{flag:'wx'});

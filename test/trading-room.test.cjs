@@ -31,6 +31,7 @@ function fixture(options={}) {
   const workers={engines:()=>['codex'],ready:()=>true,cancel:()=>{},ask:async(id,step,engine,objective)=>{
     steps.push(step);
     objectives[step]=objective;
+    if(step==='postmortem')return JSON.stringify({change:options.review||'SIZE',lesson:'다음 회차에 진입 비율을 줄여 노출을 비교합니다.'});
     if (step===options.malformed) return '{}';
     const review=['growth','defense','neutral','audit'].includes(step);
     return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2,confidencePct:options.confidence,
@@ -122,8 +123,71 @@ const waitFor=async fn=>{
   for(let i=0;i<160 && !fn();i++) await delay(5);
   assert.ok(fn(),'expected state before timeout');
 };
+const leagueBoard=({venue,offset})=>board(Array.from({length:130},(_,i)=>['C'+i,500-i,5]),venue,offset);
+roomTest('five fresh representative meetings every six hours, isolated equal balances, loss reviews and next-round sizing',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  const f=fixture({catalog:leagueBoard});t.after(()=>f.room.stop());
+  f.room.startLeague(6,'codex');
+  await waitFor(()=>f.room.view().league.round?.phase==='observing');
+  const r=f.room.view().league.round;assert.equal(r.end-r.start,6*3600000);
+  assert.equal(f.steps.length,70);assert.equal(f.room.view().trades.length,0);
+  assert.deepEqual(r.seats.map(s=>s.team),[1,9,17,25,33]);
+  for(const s of r.seats){
+    assert.equal(s.state,'open');assert.equal(f.room.view(s.meetingId).currentFill.id,s.meetingId);
+    assert.equal(f.room.view(s.meetingId).current.league.group,s.group);
+  }
+  f.setPrice(95);
+  for(let i=0;i<360;i++){t.mock.timers.tick(60000);await f.room.league.tick();}
+  await waitFor(()=>f.room.view(undefined,undefined,r.id).league.round.phase==='finished');
+  assert.equal(f.steps.filter(s=>s==='postmortem').length,5);
+  for(const s of r.seats){assert.ok(s.rank>0 && s.score<0);assert.equal(s.review.next.stakePct,8);assert.equal(s.rule.stakePct,10);}
+  await f.room.league.tick();await waitFor(()=>f.room.view().league.round.number===2 && f.room.view().league.round.phase==='observing');
+  const next=f.room.view().league.round;
+  assert.deepEqual(next.seats.map(s=>s.team),[2,10,18,26,34]);
+  for(const s of next.seats){
+    assert.equal(s.rule.version,2);
+    const cost=s.fill.qty*s.fill.entry*(1+(s.venue==='bingx'?.0005:.0025));
+    assert.ok(Math.abs(cost-(s.venue==='bingx'?16:16000))<1e-7);
+  }
+  f.room.stopLeague();assert.equal(f.room.view().league.settings.enabled,false);assert.equal(next.phase,'void');
+  assert.equal(f.room.view().trades.length,0);assert.equal(f.room.view().totals[1].cash,1000);
+});
+roomTest('missing observation windows void the contest without awarding ranks, loss rules or a burst of missed rounds',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  const f=fixture({catalog:leagueBoard});t.after(()=>f.room.stop());f.room.startLeague(6,'codex');
+  await waitFor(()=>f.room.view().league.round?.phase==='observing');
+  t.mock.timers.tick(14*3600000);await f.room.league.tick();
+  const v=f.room.view().league;assert.equal(v.round.phase,'void');assert.equal(v.history.length,1);
+  assert.ok(v.settings.nextAt>Date.now());assert.ok(v.round.seats.every(s=>!s.review && !s.rank));
+  assert.equal(f.steps.length,70);
+});
+roomTest('profitable floor rules use closed building trades and are tested prospectively before adoption or rollback',async t=>{
+  const f=fixture({catalog:leagueBoard});t.after(()=>f.room.stop());
+  const {db,learning}=f.room;
+  let seq=0;
+  function record(team,pnl,tag){
+    const id='learn-'+(++seq),m={id,buildingId:'b',team,venue:'bingx',symbol:'C'+seq+'-USDT',state:'approved',
+      training:tag,answers:{trader:{stopPct:.5,takePct:1.5,note:'돌파 구간을 확인함'}}};
+    db.prepare('INSERT INTO meetings VALUES(?,?,?)').run(id,Date.now(),JSON.stringify(m));
+    db.prepare('INSERT INTO trades(id,venue,symbol,side,entry,qty,stop,take,opened,exit,pnl,closed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id,m.venue,m.symbol,'LONG',10,1,9,11,Date.now(),10+pnl,pnl,Date.now());
+  }
+  record(1,1);record(1,2);learning.startCycle();assert.equal(learning.view().trial,undefined);
+  record(1,1);learning.startCycle();
+  const trial=learning.view().trial;assert.equal(trial.rule.team,1);
+  assert.equal(trial.rule.maxStop,.5);assert.equal(trial.rule.minRR,3);
+  const tags=Array.from({length:36},(_,i)=>learning.tag(5+i));
+  assert.equal(tags.filter(x=>x.arm==='trial').length,18);assert.equal(tags.filter(x=>x.arm==='control').length,18);
+  const trained=tags.find(x=>x.arm==='trial'),control=tags.find(x=>x.arm==='control');
+  for(let i=0;i<3;i++){record(7,2,trained);record(8,1,control);}
+  learning.startCycle();assert.equal(learning.view().last.adopted,true);assert.equal(learning.view().adopted.team,1);
+  f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
+  f.room.startBuilding('codex',40,1);await waitFor(()=>f.room.view().building.state==='done');
+  const reports=f.room.view().building.teams.flatMap(t=>t.reports);
+  assert.ok(reports.some(x=>f.room.view(x.id).current.reason.includes('멘토 매매법')));
+});
 roomTest('40 teams partition every listing, share a coin owner across venues and run bounded concurrent meetings',async t=>{
-  const rows=Array.from({length:120},(_,i)=>['X'+i,1000-i,20-i/10]);
+  const rows=Array.from({length:500},(_,i)=>['X'+i,1000-i,20-i/10]);
   rows.push(['HALTED',999,5,false]);
   let release;
   const gate=new Promise(resolve=>{release=resolve;});
@@ -132,17 +196,17 @@ roomTest('40 teams partition every listing, share a coin owner across venues and
   f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
   const run=f.room.view().building, owner=new Map();
   assert.equal(run.teams.length,40);
-  assert.equal(run.teams.flatMap(x=>x.assigned).length,242);
-  assert.equal(run.teams.flatMap(x=>x.candidates).length,240);
+  assert.equal(run.teams.flatMap(x=>x.assigned).length,1002);
+  assert.equal(run.teams.flatMap(x=>x.candidates).length,1000);
   for(const team of run.teams) for(const pair of team.assigned){
     const coin=pair.symbol.replace(/^KRW-|-USDT$/g,'');if(owner.has(coin)) assert.equal(owner.get(coin),team.id);
     owner.set(coin,team.id);
   }
   const count=run.teams.filter(x=>x.candidates.length).length;
   assert.equal(f.steps.length,0);
-  assert.throws(()=>f.room.startBuilding('codex',40,1));
-  f.room.startBuilding('codex',2,1);
-  assert.equal(run.teams.flatMap(t=>t.reports).length,2);
+  assert.throws(()=>f.room.startBuilding('codex',2,1));
+  f.room.startBuilding('codex',40,1);
+  assert.equal(run.teams.flatMap(t=>t.reports).length,40);
   assert.throws(()=>f.room.startMarket('codex',0,1));assert.throws(()=>f.room.prepareBuilding());
   release();
   await waitFor(()=>run.state==='done');
@@ -166,7 +230,7 @@ roomTest('full allocation visits every candidate, blocks duplicate exposure, and
   const f=fixture({catalog:({venue,offset})=>board(rows,venue,offset)});t.after(()=>f.room.stop());
   for(let cycle=0;cycle<2;cycle++){
     f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
-    f.room.startBuilding('codex',4,0);await waitFor(()=>f.room.view().building.state==='done');
+    f.room.startBuilding('codex',40,0);await waitFor(()=>f.room.view().building.state==='done');
     const run=f.room.view().building;
     if(cycle===0) assert.equal(run.teams.flatMap(x=>x.reports).length,14);
     const trades=f.room.view().trades;
@@ -184,13 +248,14 @@ roomTest('stop cancels every active team and reopening an interrupted building n
   const options={path:file,catalog:({venue,offset})=>board(rows,venue,offset),beforeEvidence:()=>gate};
   const f=fixture(options);t.after(()=>{resume();f.room.stop();});
   f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
-  f.room.startBuilding('codex',4,3);
+  f.room.startBuilding('codex',40,3);
+  const activeTeams=f.room.view().building.teams.filter(t=>t.reports.length).length;
   const afterCrash=fixture(options);t.after(()=>afterCrash.room.stop());
   const recovered=afterCrash.room.view().building;assert.equal(recovered.state,'stopped');
-  assert.equal(recovered.teams.flatMap(t=>t.reports).filter(r=>r.state==='error').length,4);
+  assert.equal(recovered.teams.flatMap(t=>t.reports).filter(r=>r.state==='error').length,activeTeams);
   assert.equal(afterCrash.steps.length,0);
   f.room.stopBuilding();resume();await delay(15);
-  assert.equal(f.room.view().building.teams.flatMap(t=>t.reports).filter(r=>r.state==='cancelled').length,4);
+  assert.equal(f.room.view().building.teams.flatMap(t=>t.reports).filter(r=>r.state==='cancelled').length,activeTeams);
   assert.equal(f.steps.length,0);assert.equal(f.room.view().trades.length,0);
 });
 roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create paper entries',async t=>{

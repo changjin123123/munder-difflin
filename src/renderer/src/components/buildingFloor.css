@@ -8,3 +8,4 @@
 .bd-desks button{display:grid;gap:3px;text-align:left}.bd-desks button span{font-size:12px}.bd-balance{display:inline-block;margin-right:14px}
 .bd-reports{display:flex;flex-wrap:wrap;gap:4px}.bd-floor details{padding:8px 0}.bd-floor button:focus-visible{outline:2px solid #e7c778}
 @media(max-width:620px){.bd-plan{grid-template-columns:1fr}.bd-plan nav{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.lg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin:12px 0}.lg-grid article{padding:10px;background:#203032;border:1px solid #455b53;border-radius:5px;min-width:0}.lg-grid h4{margin:0 0 6px;color:#f1ce7c}.lg-grid small{display:block}.lg-grid button{margin-top:6px}

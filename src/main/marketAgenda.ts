@@ -1,7 +1,7 @@
 import type { Markets, Venue } from '../shared/treasure';
 import { teamCount, type BuildingTeam, type MarketCandidate, type MarketScan } from '../shared/tradingRoom';
 
-export type MarketSource = (path:string, params:Record<string,string>)=>Promise<unknown>;
+export type MarketSource = (path:string, params:Record<string,string>,active?:()=>boolean)=>Promise<unknown>;
 type Row = Markets['items'][number];
 type Instrument = Pick<Row,'venue'|'symbol'>;
 const venues:Venue[] = ['bithumb','bingx'];

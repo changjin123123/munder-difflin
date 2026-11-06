@@ -65,7 +65,23 @@ export function registerTreasureDesk(allowed: () => WebContents | null, workers:
           && typeof v === 'string' && v.length <= 128)) throw new Error('허용되지 않은 요청입니다.');
     return request(path,params);
   });
-  function request(path:string,params:object):Promise<unknown> {
+  let roomReads=0;
+  const readQueue:(()=>void)[]=[];
+  const quoteQueue:(()=>void)[]=[];
+  function request(path:string,params:object,active?:()=>boolean):Promise<unknown> {
+    if(!path.startsWith('room/'))return requestNow(path,params);
+    return new Promise((resolve,reject)=>{
+      const start=()=>{
+        roomReads++;
+        Promise.resolve().then(()=>{
+          if(active && !active())throw new Error('회의가 중지됐습니다.');
+          return requestNow(path,params);
+        }).then(resolve,reject).finally(()=>{roomReads--;const next=quoteQueue.shift()??readQueue.shift();next?.();});
+      };
+      if(roomReads<3)start();else if(path==='room/evidence')readQueue.push(start);else quoteQueue.push(start);
+    });
+  }
+  function requestNow(path:string,params:object):Promise<unknown> {
     if (pending.size >= 24) throw new Error('조회 대기 중입니다. 잠시 후 다시 시도하세요.');
     const child = getEngine();
     const id = ++nextId;
@@ -85,7 +101,9 @@ export function registerTreasureDesk(allowed: () => WebContents | null, workers:
   ipcMain.handle('treasure:meeting',async(event,action:string,args:Record<string,string>={})=>{
     if (!room || event.sender!==allowed() || event.senderFrame!==event.sender.mainFrame ||
         !args || typeof args!=='object' || Object.values(args).some(v=>typeof v!=='string'||v.length>100)) throw new Error('허용되지 않은 회의 요청입니다.');
-    if (action==='buildingPrepare') room.prepareBuilding();
+    if(action==='leagueStart')room.startLeague(Number(args.hours),args.engine as Engine);
+    else if(action==='leagueStop')room.stopLeague();
+    else if (action==='buildingPrepare') room.prepareBuilding();
     else if (action==='buildingStart') room.startBuilding(args.engine as Engine,Number(args.parallel),Number(args.perTeam));
     else if (action==='buildingStop') room.stopBuilding();
     else if (action==='marketStart') room.startMarket(args.engine as Engine,Number(args.minutes),Number(args.limit));
@@ -95,7 +113,7 @@ export function registerTreasureDesk(allowed: () => WebContents | null, workers:
     else if (action==='cancel') room.cancel();
     else if (action==='close') await room.closeTrade(args.id);
     else if (action!=='view') throw new Error('지원하지 않는 회의 명령입니다.');
-    return room.view(action==='view'?args.id:undefined,args.team===undefined?undefined:Number(args.team));
+    return room.view(action==='view'?args.id:undefined,args.team===undefined?undefined:Number(args.team),args.leagueId);
   });
   app.on('will-quit', () => {room?.stop();engine?.stdin.end();});
 }

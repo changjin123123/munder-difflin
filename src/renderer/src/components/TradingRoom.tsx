@@ -5,6 +5,7 @@ import { TradingOffice } from './TradingOffice';
 import { MeetingNews } from './MeetingNews';
 import { MeetingMarket } from './MeetingMarket';
 import { BuildingFloor } from './BuildingFloor';
+import { LeaguePanel } from './LeaguePanel';
 import './tradingRoom.css';
 import './tradingTerminal.css';
 
@@ -20,6 +21,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
   const [symbol,setSymbol]=useState(initialSymbol || (initialVenue==='bithumb'?'KRW-BTC':'BTC-USDT'));
   const [scope,setScope]=useState<'building'|'market'|'single'>(initialSymbol?'single':'building');
   const [team,setTeam]=useState(1);
+  const [leagueId,setLeagueId]=useState('');
   const [marketLimit,setMarketLimit]=useState(3), [marketWait,setMarketWait]=useState(0);
   const [engine,setEngine]=useState<Engine>();
   const [history,setHistory]=useState('');
@@ -30,13 +32,14 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     let active=true; let timer:ReturnType<typeof setTimeout>;
     async function poll(){
       try {const args:Record<string,string>={};if(history)args.id=history;if(scope==='building')args.team=String(team);
+        if(leagueId)args.leagueId=leagueId;
         const v=await window.cth.tradingMeeting('view',args); if(active){setView(v);setEngine(e=>e??v.engines[0]);}}
       catch(e){if(active)setError(String(e));}
       if(active)timer=setTimeout(poll,1800);
     }
     void poll();return ()=>{active=false;clearTimeout(timer);};
-  },[history,scope,team]);
-  async function act(action:'buildingPrepare'|'buildingStart'|'buildingStop'|'marketStart'|'start'|'cancel'|'close'|'autoStart'|'autoStop',args:Record<string,string>={}){
+  },[history,scope,team,leagueId]);
+  async function act(action:'leagueStart'|'leagueStop'|'buildingPrepare'|'buildingStart'|'buildingStop'|'marketStart'|'start'|'cancel'|'close'|'autoStart'|'autoStop',args:Record<string,string>={}){
     setBusy(true);setError('');
     try { const next=await window.cth.tradingMeeting(action,scope==='building'?{...args,team:String(team)}:args);setHistory('');setView(next); }
     catch(e){setError(String(e).replace(/^.*?Error: /,''));} finally{setBusy(false);}
@@ -77,6 +80,10 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     {error && <p role="alert" className="rm-alert">{error}</p>}
     {isBuilding && <BuildingFloor view={view} team={team} select={n=>{setTeam(n);setHistory('');}} report={setHistory}
       engine={engine} busy={busy} blocked={!!openMeeting || !!repeating} act={(a,args)=>void act(a,args)}/>}
+    {isBuilding && <LeaguePanel data={view?.league} busy={busy} engine={engine} selected={leagueId} select={setLeagueId}
+      act={(start,h)=>{setLeagueId('');void act(start?'leagueStart':'leagueStop',{hours:String(h),engine:engine??''});}}
+      report={(n,id)=>{setTeam(n);setHistory(id);}}/>}
+    {m?.training && <p className="rm-help">{m.training.arm==='trial'?'멘토 매매법 시험 팀':m.training.arm==='control'?'기존 매매법 비교 팀':'채택한 멘토 매매법'}{m.training.rule && ' · '+m.training.rule.floor+'층 매매법 · '+m.training.rule.idea}</p>}
     {!isBuilding && marketSession && (!history || m?.sessionId===marketSession.id) && <section className="rm-market-run" aria-label="전 종목 회의 진행">
       <div role="status"><strong>{marketSession.reason}</strong> · {marketSession.meetings.length}/{marketSession.limit}종목 · 모의 체결 {marketSession.approved} · 관망 {marketSession.held}
         {marketSession.nextAt ? ' · 다음 회의 '+clock(marketSession.nextAt) : ''}</div>

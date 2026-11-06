@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { teamTarget, type BuildingRun, type BuildingTeam, type Engine, type Instrument, type Meeting } from '../shared/tradingRoom';
+import { teamCount,teamTarget, type BuildingRun, type BuildingTeam, type Engine, type Instrument, type Meeting } from '../shared/tradingRoom';
 import { buildingAgenda, type MarketSource } from './marketAgenda';
 
 export class TradingBuilding {
@@ -29,7 +29,7 @@ export class TradingBuilding {
   prepare() {
     if(this.busy) throw new Error('진행 중인 건물 작업을 먼저 중지하세요.');
     const run:BuildingRun={id:randomUUID(),at:Date.now(),state:'scanning',reason:'양 거래소 종목 배정 중',
-      teams:[],venues:[],perTeam:1,parallel:2};
+      teams:[],venues:[],perTeam:1,parallel:teamCount};
     this.current=run;this.save(run);
     void this.assign(run);
   }
@@ -48,11 +48,12 @@ export class TradingBuilding {
       if(active()) {run.state='error';run.reason=e instanceof Error?e.message:'종목 배정 실패';this.save(run);}
     }
   }
-  start(engine:Engine,parallel:number,perTeam:number) {
+  start(engine:Engine,parallel:number,perTeam:number,beforeStart:()=>void) {
     const run=this.current;
     if(!run || run.state!=='ready') throw new Error('먼저 건물에 전 종목을 배정하세요.');
-    if(![1,2,4].includes(parallel) || ![0,1,3].includes(perTeam)) throw new Error('팀 실행 범위를 확인하세요.');
+    if(parallel!==teamCount || ![0,1,3].includes(perTeam)) throw new Error('건물 회의는 40팀 단위입니다. 팀 실행 범위를 확인하세요.');
     if(Date.now()-run.at>10*60000) throw new Error('배정 시세가 10분 이상 지났습니다. 종목을 다시 배정하세요.');
+    beforeStart();
     run.parallel=parallel;run.perTeam=perTeam;run.engine=engine;run.state='running';run.reason='팀별 회의 진행 중';
     this.save(run);this.pump(run);
   }
@@ -60,7 +61,7 @@ export class TradingBuilding {
     if(this.current!==run || run.state!=='running') return;
     while(this.active.size<run.parallel) {
       // Each team gets a turn before any team starts its next instrument.
-      const team=run.teams.filter(t=>!this.active.has(t.id) && t.reports.length<teamTarget(t,run.perTeam))
+      const team=run.teams.filter(t=>!this.active.has(t.id) && t.reports.at(-1)?.state!=='error' && t.reports.length<teamTarget(t,run.perTeam))
         .sort((a,b)=>a.reports.length-b.reports.length || a.id-b.id)[0];
       if(!team) break;
       const i=team.reports.length, pick=team.candidates[i];
@@ -73,13 +74,16 @@ export class TradingBuilding {
         report.state=m.state;
         if(this.current!==run || this.active.get(team.id)!==m) return;
         this.active.delete(team.id);
-        if(m.state==='error') {this.stop('에이전트 오류로 건물 회의를 중지했습니다. '+m.reason,'error');return;}
+        if(m.state==='error' && /사용 한도|로그인|시간 초과|Codex 서버/.test(m.reason)) {this.stop('엔진 오류로 건물 회의를 중지했습니다. '+m.reason,'error');return;}
         this.pump(run);
       }).catch(e=>{
         if(this.current===run && run.state==='running') this.stop(String(e),'error');
       });
     }
-    if(!this.active.size) {run.state='done';run.reason='배정한 회의를 모두 마쳤습니다.';this.save(run);}
+    if(!this.active.size) {
+      const errors=run.teams.filter(t=>t.reports.at(-1)?.state==='error').length;
+      run.state='done';run.reason=errors?'건물 회의 종료 · 응답 오류 '+errors+'팀':'배정한 회의를 모두 마쳤습니다.';this.save(run);
+    }
   }
   stop(reason='사용자가 건물 회의를 중지했습니다.',state:'stopped'|'error'='stopped') {
     const run=this.current;

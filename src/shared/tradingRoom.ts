@@ -36,6 +36,8 @@ export type Proposal = {side:'HOLD'} | {side:'LONG'|'SHORT'; entry:number; stop:
 export interface Evidence { venue: Venue; symbol: string; captured: number; quote: Quote;
   sources: Record<string,unknown>; missing: string[]; news?:NewsItem[] }
 export interface Meeting {
+  training?:import('./floorLearning').TrainingTag;
+  league?:import('./paperLeague').LeagueTag;
   id: string; venue: Venue; symbol: string; engine: Engine; created: number;
   state: 'active'|'approved'|'hold'|'error'|'cancelled'; reason: string;
   evidence?: Evidence; speaking: Step[]; answers: Partial<Record<Step,Answer>>;
@@ -78,6 +80,8 @@ export interface Fill { id: string; venue: Venue; symbol: string; side: 'LONG'|'
   entry: number; qty: number; stop: number; take: number; opened: number; exit: number|null;
   pnl: number|null; closed: number|null; reason: string|null }
 export interface RoomView {
+  learning:import('./floorLearning').FloorLearningView;
+  league:import('./paperLeague').LeagueView;
   legacyActive:boolean;
   building?:BuildingRun|null;
   teamFunds?:{venue:Venue;cash:number;budget:number;open:number}[];
