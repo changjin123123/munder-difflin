@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { AgentProvider } from '../shared/agentProvider';
+import type { MarketQuery, TreasureData, TreasurePath } from '../shared/treasure';
 import type { HireManifest } from '../shared/hire';
 export type { HireManifest } from '../shared/hire';
 import type { IntegrationRecord, IntegrationTemplate } from '../shared/integrations';
@@ -565,6 +566,9 @@ export interface PreservedWorktreeSnapshot {
 }
 
 const api = {
+  treasureAvailable: (): Promise<boolean> => ipcRenderer.invoke('treasure:available'),
+  treasureRequest: <T extends TreasurePath>(path: T, params: MarketQuery = {}): Promise<TreasureData[T]> =>
+    ipcRenderer.invoke('treasure:request', path, params),
   version: __APP_VERSION__,
 
   // ─── Analytics ───────────────────────────────────────────────────────────

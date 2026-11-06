@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
+import { TreasureOffice } from './components/TreasureOffice';
 import brandLogo from '@brand/logo.png?url';
 import './design/global.css';
 import './i18n';
@@ -25,6 +25,6 @@ if (!root) throw new Error('No root element');
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <TreasureOffice />
   </StrictMode>
 );

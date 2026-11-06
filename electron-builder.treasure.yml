@@ -1,0 +1,26 @@
+extends: electron-builder.yml
+appId: local.munder.treasureoffice
+productName: Munder Treasure Office
+extraMetadata:
+  name: munder-treasure-office
+  productName: Munder Treasure Office
+publish: null
+protocols: []
+npmRebuild: false
+electronDist: node_modules/electron/dist
+win:
+  signAndEditExecutable: false
+  target: portable
+portable:
+  artifactName: Munder-Treasure-Office.exe
+extraResources:
+  - from: resources/md-slack-reply.cjs
+    to: md-slack-reply.cjs
+  - from: resources/kg.cjs
+    to: kg.cjs
+  - from: src/main/kg-core.cjs
+    to: kg-core.cjs
+  - from: resources/skills
+    to: skills
+  - from: .treasure-stage
+    to: treasure
