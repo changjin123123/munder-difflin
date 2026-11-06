@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { seats, rounds, roleFor, castNames, type Answer, type Engine, type Evidence, type Fill,
-  type Meeting, type Quote, type RoomView, type Step } from '../shared/tradingRoom';
+  repeatLimits, repeatMinutes, type PaperSession, type Meeting, type Quote, type RoomView, type Step } from '../shared/tradingRoom';
 import type { Venue } from '../shared/treasure';
 
 export interface RoomWorkers {
@@ -51,6 +51,8 @@ function decision(m:Meeting): string|undefined {
 export class TradingRoom {
   private readonly db: Database.Database;
   private current: Meeting|null=null;
+  private session:PaperSession|null=null;
+  private nextMeeting?:ReturnType<typeof setTimeout>;
   private priceNotice='';
   private monitoring=false;
   private timer: ReturnType<typeof setInterval>;
@@ -61,7 +63,13 @@ export class TradingRoom {
       CREATE TABLE IF NOT EXISTS trades(id TEXT PRIMARY KEY,venue TEXT NOT NULL,symbol TEXT NOT NULL,side TEXT NOT NULL,
         entry REAL NOT NULL,qty REAL NOT NULL,stop REAL NOT NULL,take REAL NOT NULL,opened INTEGER NOT NULL,
         exit REAL,pnl REAL,closed INTEGER,reason TEXT);
-      CREATE UNIQUE INDEX IF NOT EXISTS open_symbol ON trades(venue,symbol) WHERE closed IS NULL;`);
+      CREATE UNIQUE INDEX IF NOT EXISTS open_symbol ON trades(venue,symbol) WHERE closed IS NULL;
+      CREATE TABLE IF NOT EXISTS paper_sessions(id TEXT PRIMARY KEY,created INTEGER NOT NULL,body TEXT NOT NULL);`);
+    const batch=this.db.prepare('SELECT body FROM paper_sessions ORDER BY created DESC LIMIT 1').get() as {body:string}|undefined;
+    if(batch) {
+      this.session=JSON.parse(batch.body);
+      if(this.sessionActive()) this.endSession('stopped','앱 종료로 자동 반복이 중지됐습니다.');
+    }
     const last=this.db.prepare('SELECT body FROM meetings ORDER BY created DESC LIMIT 1').get() as {body:string}|undefined;
     if (last) {
       this.current=JSON.parse(last.body);
@@ -73,7 +81,37 @@ export class TradingRoom {
     this.db.prepare('INSERT INTO meetings VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(m.id,m.created,JSON.stringify(m));
   }
   private finish(m:Meeting,state:Meeting['state'],reason:string) {
-    m.state=state; m.reason=reason; m.speaking=[]; this.save(m);
+    m.state=state; m.reason=reason; m.speaking=[]; m.finishedAt=Date.now();
+    this.db.transaction(()=>{
+      this.save(m);
+      const s=this.session;
+      if(!s || s.state!=='running' || m.sessionId!==s.id || s.meetings.at(-1)!==m.id) return;
+      if(state==='approved') s.approved++;
+      if(state==='hold') s.held++;
+      if(state==='cancelled' || state==='error') {this.endSession(state==='error'?'error':'stopped',reason);return;}
+      if(s.meetings.length>=s.limit) {this.endSession('done','설정한 회의 횟수를 마쳤습니다.');return;}
+      s.state='waiting';s.reason='다음 회의 대기 중';s.nextAt=m.finishedAt!+s.minutes*60000;
+      this.saveSession(s);
+      this.armNext(s);
+    })();
+  }
+  private sessionActive() {return this.session?.state==='running' || this.session?.state==='waiting';}
+  private saveSession(s:PaperSession) {
+    this.db.prepare('INSERT INTO paper_sessions VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(s.id,s.created,JSON.stringify(s));
+  }
+  private endSession(state:'done'|'stopped'|'error',reason:string) {
+    clearTimeout(this.nextMeeting);
+    const s=this.session;
+    if(s) {s.state=state;s.reason=reason;s.nextAt=null;this.saveSession(s);}
+  }
+  private armNext(s:PaperSession) {
+    clearTimeout(this.nextMeeting);
+    this.nextMeeting=setTimeout(()=>{
+      if(this.session!==s || s.state!=='waiting' || s.nextAt===null) return;
+      if(Date.now()<s.nextAt) {this.armNext(s);return;}
+      try {this.begin(s.venue,s.symbol,s.engine,s);}
+      catch(e) {this.endSession('error',e instanceof Error?e.message:'다음 회의를 시작하지 못했습니다.');}
+    },Math.max(0,s.nextAt!-Date.now()));
   }
   private totals(v:Venue) {
     const item=this.db.prepare('SELECT coalesce(sum(pnl),0) pnl, coalesce(sum(CASE WHEN closed IS NULL THEN entry*qty ELSE 0 END),0) reserved, count(CASE WHEN closed IS NULL THEN 1 END) n FROM trades WHERE venue=?').get(v) as {pnl:number;reserved:number;n:number};
@@ -84,15 +122,35 @@ export class TradingRoom {
     return {current:found?JSON.parse(found.body):this.current,
       history:this.db.prepare("SELECT id,created,json_extract(body,'$.symbol') symbol,json_extract(body,'$.state') state FROM meetings ORDER BY created DESC LIMIT 40").all() as RoomView['history'],
       trades:this.db.prepare('SELECT * FROM trades ORDER BY (closed IS NULL) DESC,opened DESC LIMIT 100').all() as Fill[],
-      totals:[this.totals('bithumb'),this.totals('bingx')],engines:this.workers.engines(),officeReady:this.workers.ready(),priceNotice:this.priceNotice};
+      totals:[this.totals('bithumb'),this.totals('bingx')],engines:this.workers.engines(),officeReady:this.workers.ready(),priceNotice:this.priceNotice,session:this.session};
   }
   start(venue:Venue,symbol:string,engine:Engine) {
+    if(this.sessionActive()) throw new Error('자동 모의 테스트가 진행 중입니다.');
+    return this.begin(venue,symbol,engine);
+  }
+  startAuto(venue:Venue,symbol:string,engine:Engine,minutes:number,limit:number) {
+    if(this.sessionActive()) throw new Error('이미 자동 모의 테스트가 진행 중입니다.');
+    if(!repeatMinutes.some(v=>v===minutes) || !repeatLimits.some(v=>v===limit)) throw new Error('반복 간격과 최대 회의 횟수를 확인하세요.');
+    const s:PaperSession={id:randomUUID(),venue,symbol,engine,minutes,limit,created:Date.now(),state:'running',
+      nextAt:null,reason:'',meetings:[],approved:0,held:0};
+    this.begin(venue,symbol,engine,s);
+    return s.id;
+  }
+  stopAuto(reason='사용자가 자동 반복을 중지했습니다.') {
+    if(!this.sessionActive()) return;
+    this.endSession('stopped',reason);
+    if(this.current?.state==='active' && this.current.sessionId===this.session?.id) this.cancel();
+  }
+  private begin(venue:Venue,symbol:string,engine:Engine,s?:PaperSession) {
     if (!this.workers.ready()) throw new Error('사무실의 첫 설정을 먼저 마치세요.');
     if (!this.workers.engines().includes(engine)) throw new Error('선택한 사무실 엔진을 설치하고 로그인하세요.');
     if (this.current?.state==='active') throw new Error('이미 회의가 진행 중입니다.');
     if (!(venue==='bithumb'?/^KRW-[A-Z0-9]{1,30}$/:venue==='bingx'?/^[A-Z0-9]{1,30}-USDT$/:/^(?!)$/).test(symbol)) throw new Error('거래소 종목을 확인하세요.');
     const m:Meeting={id:randomUUID(),created:Date.now(),venue,symbol,engine,state:'active',reason:'공개 자료 수집 중',speaking:[],answers:{}};
-    this.current=m; this.save(m); void this.run(m); return m.id;
+    if(s){m.sessionId=s.id;s.meetings.push(m.id);s.state='running';s.nextAt=null;s.reason='회의 진행 중';}
+    this.db.transaction(()=>{this.save(m);if(s)this.saveSession(s);})();
+    if(s)this.session=s;
+    this.current=m; void this.run(m); return m.id;
   }
   cancel() {
     const m=this.current;
@@ -189,5 +247,5 @@ export class TradingRoom {
       this.priceNotice=missing.length?'호가 재조회 중 · '+missing.join(', '):'';
     } finally { this.monitoring=false; }
   }
-  stop() {clearInterval(this.timer);this.cancel();}
+  stop() {clearInterval(this.timer);this.stopAuto('앱 종료로 자동 반복이 중지됐습니다.');this.cancel();}
 }

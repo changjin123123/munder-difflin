@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { seats, rounds, type Engine, type RoomView } from '../../../shared/tradingRoom';
+import { seats, rounds, repeatLimits, repeatMinutes, type Engine, type RoomView } from '../../../shared/tradingRoom';
 import type { Venue } from '../../../shared/treasure';
 import { TradingOffice } from './TradingOffice';
 import './tradingRoom.css';
@@ -17,6 +17,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
   const [engine,setEngine]=useState<Engine>();
   const [history,setHistory]=useState('');
   const [busy,setBusy]=useState(false);
+  const [minutes,setMinutes]=useState(5), [limit,setLimit]=useState(2);
   const [error,setError]=useState('');
   useEffect(()=>{
     let active=true; let timer:ReturnType<typeof setTimeout>;
@@ -27,7 +28,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     }
     void poll();return ()=>{active=false;clearTimeout(timer);};
   },[history]);
-  async function act(action:'start'|'cancel'|'close',args:Record<string,string>={}){
+  async function act(action:'start'|'cancel'|'close'|'autoStart'|'autoStop',args:Record<string,string>={}){
     setBusy(true);setError('');
     try { const next=await window.cth.tradingMeeting(action,args);setHistory('');setView(next); }
     catch(e){setError(String(e).replace(/^.*?Error: /,''));} finally{setBusy(false);}
@@ -36,6 +37,9 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
   const tech=m?.evidence?.sources.technical as {closes?: number[]}|null;
   const closes=tech?.closes??[], low=Math.min(...closes), high=Math.max(...closes);
   const openMeeting=view?.history.some(h=>h.state==='active');
+  const session=view?.session;
+  const repeating=session?.state==='running' || session?.state==='waiting';
+  const canStart=!!view?.officeReady && !!engine && !openMeeting && !repeating && !busy && !!symbol;
   return <section className="rm-wrap">
     <header><div><h2>트레이딩 사무실</h2></div>
       <select aria-label="회의 기록" value={history} onChange={e=>setHistory(e.target.value)}><option value="">현재 회의</option>{view?.history.map(r=><option key={r.id} value={r.id}>{clock(r.created)} · {r.symbol} · {labels[r.state]}</option>)}</select></header>
@@ -44,11 +48,27 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
       <label>거래소<select value={venue} onChange={e=>{const v=e.target.value as Venue;setVenue(v);setSymbol(v==='bithumb'?'KRW-BTC':'BTC-USDT');}}><option value="bithumb">빗썸 현물</option><option value="bingx">빙엑스 선물</option></select></label>
       <label>종목<input aria-label="회의 종목" maxLength={40} value={symbol} onChange={e=>setSymbol(e.target.value.trim().toUpperCase())}/></label>
       <label>사무실 엔진<select aria-label="회의 엔진" value={engine??''} onChange={e=>setEngine(e.target.value as Engine)}>{!view?.engines.length && <option value="">사용 가능 엔진 없음</option>}{view?.engines.map(p=><option key={p}>{p}</option>)}</select></label>
-      <button className="rm-start" disabled={!view?.officeReady || !engine || !!openMeeting || busy || !symbol} onClick={()=>void act('start',{venue,symbol,engine:engine!})}>13인 회의 시작</button>
-      {openMeeting && <button disabled={busy} onClick={()=>void act('cancel')}>진행 중인 회의 중지</button>}
+      <button className="rm-start" disabled={!canStart} onClick={()=>void act('start',{venue,symbol,engine:engine!})}>13인 회의 시작</button>
+      {openMeeting && !repeating && <button disabled={busy} onClick={()=>void act('cancel')}>진행 중인 회의 중지</button>}
     </div>
     <p className="rm-help">{view && !view.officeReady?'사무실 탭에서 작업공간 설정을 마치세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
     {error && <p role="alert" className="rm-alert">{error}</p>}
+    <section className="rm-auto" aria-label="자동 모의 테스트">
+      <h3>자동 모의 테스트</h3>
+      <div className="rm-controls">
+        <label>회의 종료 후 대기<select value={minutes} disabled={repeating} onChange={e=>setMinutes(Number(e.target.value))}>{repeatMinutes.map(n=><option value={n} key={n}>{n}분</option>)}</select></label>
+        <label>총 회의 횟수<select value={limit} disabled={repeating} onChange={e=>setLimit(Number(e.target.value))}>{repeatLimits.map(n=><option value={n} key={n}>{n}회</option>)}</select></label>
+        {repeating?<button disabled={busy} onClick={()=>void act('autoStop')}>자동 반복 중지</button>:
+          <button className="rm-start" disabled={!canStart} onClick={()=>void act('autoStart',{venue,symbol,engine:engine!,minutes:String(minutes),limit:String(limit)})}>자동 모의 시작</button>}
+      </div>
+      <p className="rm-help">{repeating?session.symbol+' · '+session.engine+' · '+session.minutes+'분 간격':
+        '첫 회의는 바로 시작하고, 이후에는 새 시세로 회의를 엽니다. 최대 '+(limit*14)+'개 엔진 작업을 사용합니다.'} 앱을 닫으면 반복이 중지됩니다.</p>
+      {session && <div className="rm-auto-result" role="status"><b>{session.state==='done'?'자동 테스트 완료':session.reason}</b>
+        <span>{venueName(session.venue)} {session.symbol} · 회의 {session.meetings.length}/{session.limit}회 · 관망 {session.held} · 모의 체결 {session.approved}</span>
+        {session.nextAt && <span>다음 회의 {new Date(session.nextAt).toLocaleTimeString('ko-KR')}</span>}
+        <div>{session.meetings.map((id,i)=><button key={id} onClick={()=>setHistory(id)}>{i+1}회차 회의록</button>)}</div>
+      </div>}
+    </section>
     {closes.length>1 && <div className="rm-chart"><div>15분 확정봉 · 종가 <small>{clock(m!.evidence!.captured*1000)} 수집</small></div>
       <svg viewBox="0 0 300 45" role="img" aria-label="최근 32개 확정봉 종가 추이"><polyline fill="none" stroke="currentColor" strokeWidth="2" points={closes.map((p,i)=>i*300/(closes.length-1)+','+(42-39*(p-low)/(high-low||1))).join(' ')}/></svg></div>}
     {m?.evidence && <details><summary>회의에서 사용한 시세와 자료</summary>

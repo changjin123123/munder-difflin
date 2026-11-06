@@ -63,3 +63,44 @@ roomTest('BingX paper short closes on the ask with spread, fees and slippage',as
   f.setPrice(98);await f.room.closeTrade(trade.id);
   const closed=f.room.view().trades[0];assert.equal(closed.exit,98.02*1.0003);assert.ok(closed.pnl>0);
 });
+
+roomTest('automatic meetings wait five minutes after completion, count holds and stop at the requested limit',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});
+  const f=fixture();t.after(()=>f.room.stop());
+  const settle=()=>new Promise(r=>setImmediate(r));
+  const id=f.room.startAuto('bingx','BTC-USDT','codex',5,2);
+  assert.throws(()=>f.room.startAuto('bingx','BTC-USDT','codex',5,2));
+  await settle();
+  const first=f.room.view();
+  assert.equal(first.session.id,id);
+  assert.equal(first.session.state,'waiting');
+  assert.equal(first.session.nextAt,first.current.finishedAt+300000);
+  assert.throws(()=>f.room.start('bingx','BTC-USDT','codex'));
+  t.mock.timers.tick(299999);await settle();
+  assert.equal(f.steps.length,14);
+  t.mock.timers.tick(1);await settle();
+  let v=f.room.view();
+  assert.equal(v.session.state,'done');assert.equal(v.session.meetings.length,2);
+  assert.equal(v.session.approved,1);assert.equal(v.session.held,1);assert.equal(v.trades.length,1);
+  assert.ok(v.session.meetings.every(mid=>f.room.view(mid).current.sessionId===id));
+  t.mock.timers.tick(600000);await settle();assert.equal(f.steps.length,28);
+});
+
+roomTest('stopping a waiting batch and worker errors never start a later paid round',async t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});
+  const settle=()=>new Promise(r=>setImmediate(r));
+  for(const invalid of [[0,2],[5,1],[5,200],[NaN,2]]) {
+    const f=fixture();t.after(()=>f.room.stop());
+    assert.throws(()=>f.room.startAuto('bingx','BTC-USDT','codex',...invalid));assert.equal(f.steps.length,0);
+  }
+  for(const options of [{},{malformed:'technical'}]){
+    const f=fixture(options);t.after(()=>f.room.stop());
+    f.room.startAuto('bingx','BTC-USDT','codex',5,2);
+    await settle();
+    if(!options.malformed) f.room.stopAuto();
+    const before=f.steps.length;
+    t.mock.timers.tick(600000);await settle();
+    assert.equal(f.steps.length,before);
+    assert.equal(f.room.view().session.state,options.malformed?'error':'stopped');
+  }
+});

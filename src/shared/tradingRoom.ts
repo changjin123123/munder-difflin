@@ -34,6 +34,14 @@ export interface Meeting {
   id: string; venue: Venue; symbol: string; engine: Engine; created: number;
   state: 'active'|'approved'|'hold'|'error'|'cancelled'; reason: string;
   evidence?: Evidence; speaking: Step[]; answers: Partial<Record<Step,Answer>>;
+  sessionId?:string; finishedAt?:number;
+}
+export const repeatMinutes = [5,15,30,60] as const;
+export const repeatLimits = [2,3,4,6] as const;
+export interface PaperSession {
+  id:string; venue:Venue; symbol:string; engine:Engine; minutes:number; limit:number;
+  created:number; state:'running'|'waiting'|'done'|'stopped'|'error'; nextAt:number|null;
+  reason:string; meetings:string[]; approved:number; held:number;
 }
 export interface Fill { id: string; venue: Venue; symbol: string; side: 'LONG'|'SHORT';
   entry: number; qty: number; stop: number; take: number; opened: number; exit: number|null;
@@ -41,5 +49,5 @@ export interface Fill { id: string; venue: Venue; symbol: string; side: 'LONG'|'
 export interface RoomView {
   current: Meeting|null; history: {id:string;symbol:string;state:string;created:number}[];
   trades: Fill[]; totals: {venue:Venue; cash:number; pnl:number; open:number}[];
-  engines: Engine[]; officeReady: boolean; priceNotice: string;
+  engines: Engine[]; officeReady: boolean; priceNotice: string; session:PaperSession|null;
 }
