@@ -18,6 +18,7 @@ function fixture(options={}) {
     const {venue,symbol}=params;
     if(path==='markets') return options.catalog(params);
     if (path==='room/evidence') {
+      if(options.beforeEvidence) await options.beforeEvidence();
       if(options.badEvidence===symbol) throw new Error('호가 없음');
       const news=options.noNews?[]:['N1','N2'].map((id,i)=>({id,source:'CoinDesk',title:'합성 테스트 '+id,
         url:options.badUrl?'https://coindesk.com.example.org/a':'https://www.coindesk.com/test/'+i,
@@ -36,7 +37,7 @@ function fixture(options={}) {
       newsRefs:step===options.badCitation?['N99']:['N1'],newsEvents:options.emptyBrief?[]:[{summary:'동일 사건의 두 보도',newsRefs:['N1','N2']},
         {summary:'중복 후속보도',newsRefs:['N1']}]});
   }};
-  const room=new TradingRoom(':memory:',source,workers);
+  const room=new TradingRoom(options.path||':memory:',source,workers);
   async function run(venue='bingx'){
     room.start(venue,venue==='bingx'?'BTC-USDT':'KRW-BTC','codex');
     for(let i=0;i<40 && room.view().current.state==='active';i++) await delay(2);
@@ -115,6 +116,82 @@ roomTest('stopping a market scan discards late pages and never calls an engine',
   t.after(()=>f.room.stop());f.room.startMarket('codex',0,2);f.room.stopAuto();resolvers.forEach(fn=>fn());
   await new Promise(r=>setImmediate(r));const v=f.room.view();
   assert.equal(v.session.state,'stopped');assert.equal(v.current,null);assert.equal(f.steps.length,0);
+});
+
+const waitFor=async fn=>{
+  for(let i=0;i<160 && !fn();i++) await delay(5);
+  assert.ok(fn(),'expected state before timeout');
+};
+roomTest('40 teams partition every listing, share a coin owner across venues and run bounded concurrent meetings',async t=>{
+  const rows=Array.from({length:120},(_,i)=>['X'+i,1000-i,20-i/10]);
+  rows.push(['HALTED',999,5,false]);
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const f=fixture({catalog:({venue,offset})=>board(rows,venue,offset),beforeEvidence:()=>gate});
+  t.after(()=>{release();f.room.stop();});
+  f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
+  const run=f.room.view().building, owner=new Map();
+  assert.equal(run.teams.length,40);
+  assert.equal(run.teams.flatMap(x=>x.assigned).length,242);
+  assert.equal(run.teams.flatMap(x=>x.candidates).length,240);
+  for(const team of run.teams) for(const pair of team.assigned){
+    const coin=pair.symbol.replace(/^KRW-|-USDT$/g,'');if(owner.has(coin)) assert.equal(owner.get(coin),team.id);
+    owner.set(coin,team.id);
+  }
+  const count=run.teams.filter(x=>x.candidates.length).length;
+  assert.equal(f.steps.length,0);
+  assert.throws(()=>f.room.startBuilding('codex',40,1));
+  f.room.startBuilding('codex',2,1);
+  assert.equal(run.teams.flatMap(t=>t.reports).length,2);
+  assert.throws(()=>f.room.startMarket('codex',0,1));assert.throws(()=>f.room.prepareBuilding());
+  release();
+  await waitFor(()=>run.state==='done');
+  assert.equal(f.steps.length,count*14);
+  const view=f.room.view();assert.equal(view.trades.length,count);
+  for(const team of run.teams.filter(x=>x.reports.length)){
+    const v=f.room.view(undefined,team.id);
+    assert.equal(v.current.team,team.id);assert.equal(v.current.buildingId,run.id);
+    assert.equal(v.history.length,1);assert.equal(v.trades.length,1);
+    const budget=v.teamFunds.find(x=>x.venue===v.current.venue);
+    assert.ok(Math.abs(budget.cash-budget.budget*.75)<1e-7);
+    assert.equal(v.trades[0].id,team.reports[0].id);
+  }
+});
+roomTest('full allocation visits every candidate, blocks duplicate exposure, and enforces the same team cap across runs',async t=>{
+  const {buildingAgenda}=load('src/main/marketAgenda.ts');
+  const universe=Array.from({length:500},(_,i)=>['Z'+i,900-i,7]);
+  const raw=await buildingAgenda(async(_,p)=>board(universe,p.venue,p.offset),()=>true,[],[]);
+  const symbols=raw.teams.find(x=>x.assigned.length>=14).assigned.filter(x=>x.venue==='bingx').slice(0,7).map(x=>x.symbol.replace('-USDT',''));
+  const rows=symbols.map((x,i)=>[x,80-i,5]);
+  const f=fixture({catalog:({venue,offset})=>board(rows,venue,offset)});t.after(()=>f.room.stop());
+  for(let cycle=0;cycle<2;cycle++){
+    f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
+    f.room.startBuilding('codex',4,0);await waitFor(()=>f.room.view().building.state==='done');
+    const run=f.room.view().building;
+    if(cycle===0) assert.equal(run.teams.flatMap(x=>x.reports).length,14);
+    const trades=f.room.view().trades;
+    assert.equal(new Set(trades.map(t=>t.symbol.replace(/^KRW-|-USDT$/g,''))).size,trades.length);
+    for(const venue of ['bithumb','bingx']) assert.ok(trades.filter(t=>t.venue===venue).length<=4);
+    for(const sum of f.room.view().totals) assert.ok(sum.cash>=0);
+  }
+});
+roomTest('stop cancels every active team and reopening an interrupted building never launches a worker',async t=>{
+  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'paper-building-')),file=path.join(tmp,'room.db');
+  const rows=Array.from({length:60},(_,i)=>['T'+i,70-i,2]);
+  let resume;
+  const gate=new Promise(r=>{resume=r;});
+  const options={path:file,catalog:({venue,offset})=>board(rows,venue,offset),beforeEvidence:()=>gate};
+  const f=fixture(options);t.after(()=>{resume();f.room.stop();});
+  f.room.prepareBuilding();await waitFor(()=>f.room.view().building.state==='ready');
+  f.room.startBuilding('codex',4,3);
+  const afterCrash=fixture(options);t.after(()=>afterCrash.room.stop());
+  const recovered=afterCrash.room.view().building;assert.equal(recovered.state,'stopped');
+  assert.equal(recovered.teams.flatMap(t=>t.reports).filter(r=>r.state==='error').length,4);
+  assert.equal(afterCrash.steps.length,0);
+  f.room.stopBuilding();resume();await delay(15);
+  assert.equal(f.room.view().building.teams.flatMap(t=>t.reports).filter(r=>r.state==='cancelled').length,4);
+  assert.equal(f.steps.length,0);assert.equal(f.room.view().trades.length,0);
 });
 roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create paper entries',async t=>{
   for (const [opts,venue,state] of [[{veto:'defense'},'bingx','hold'],[{malformed:'technical'},'bingx','error'],

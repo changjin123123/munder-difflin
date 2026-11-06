@@ -1,5 +1,5 @@
 import type { Markets, Venue } from '../shared/treasure';
-import type { MarketCandidate, MarketScan } from '../shared/tradingRoom';
+import { teamCount, type BuildingTeam, type MarketCandidate, type MarketScan } from '../shared/tradingRoom';
 
 export type MarketSource = (path:string, params:Record<string,string>)=>Promise<unknown>;
 type Row = Markets['items'][number];
@@ -54,33 +54,39 @@ function ranks(rows:Row[], value:(r:Row)=>number) {
   return result;
 }
 
-export async function scanMarkets(source:MarketSource, active:()=>boolean, reviewed:Instrument[],
-    open:Instrument[], recent:Instrument[]):Promise<MarketScan> {
+async function readBoard(source:MarketSource, active:()=>boolean) {
   const data=await Promise.allSettled(venues.map(venue=>catalog(venue,source,active)));
   const now=Date.now();
   const scan:MarketScan={at:now,venues:[],candidates:[]};
-  const excluded=new Set([...open,...reviewed].map(asset)), last=new Set(recent.map(asset));
+  const listed:Instrument[]=[];
   const pool:{candidate:MarketCandidate;score:number}[]=[];
   data.forEach((result,i)=>{
     const venue=venues[i];
     if (result.status==='rejected') {
       scan.venues.push({venue,listed:0,eligible:0,issue:String(result.reason?.message||'시세 조회 실패')});return;
     }
+    for(const {venue,symbol} of result.value) listed.push({venue,symbol});
     const rows=result.value.filter(r=>r.paper_eligible && recentQuote(r,now) &&
       r.price!==null && Number.isFinite(r.price) && r.price>0 &&
       r.turnover_24h!==null && Number.isFinite(r.turnover_24h) && r.turnover_24h>0 && Number.isFinite(r.change_pct));
     scan.venues.push({venue,listed:result.value.length,eligible:rows.length});
     const volume=ranks(rows,r=>r.turnover_24h!), movement=ranks(rows,r=>Math.abs(r.change_pct!));
     for(const row of rows) {
-      if(excluded.has(asset(row))) continue;
       const turnoverRank=volume.get(row.symbol)!, moveRank=movement.get(row.symbol)!;
       pool.push({candidate:{venue,symbol:row.symbol,change:row.change_pct!,turnover:row.turnover_24h!,turnoverRank,moveRank},
         score:(.6*(turnoverRank-1)+.4*(moveRank-1))/Math.max(rows.length-1,1)});
     }
   });
+  return {scan,pool,listed};
+}
+
+export async function scanMarkets(source:MarketSource, active:()=>boolean, reviewed:Instrument[],
+    open:Instrument[], recent:Instrument[]):Promise<MarketScan> {
+  const {scan,pool}=await readBoard(source,active);
+  const excluded=new Set([...open,...reviewed].map(asset)), last=new Set(recent.map(asset));
   const counts={bithumb:0,bingx:0};
   for(const x of reviewed) counts[x.venue]++;
-  const used=new Set<string>();
+  const used=excluded;
   while(scan.candidates.length<5) {
     const remaining=pool.filter(x=>!used.has(asset(x.candidate)));
     if(!remaining.length) break;
@@ -91,4 +97,23 @@ export async function scanMarkets(source:MarketSource, active:()=>boolean, revie
     scan.candidates.push(pick); used.add(asset(pick)); counts[pick.venue]++;
   }
   return scan;
+}
+
+// Assign the same underlying coin to one stable team on both venues.
+function owner(pair:Instrument) {
+  let hash=2166136261;
+  for(const ch of asset(pair)) hash=Math.imul(hash^ch.charCodeAt(0),16777619);
+  return (hash>>>0)%teamCount;
+}
+export async function buildingAgenda(source:MarketSource,active:()=>boolean,open:Instrument[],recent:Instrument[]) {
+  const {scan,pool,listed}=await readBoard(source,active);
+  const teams:BuildingTeam[]=Array.from({length:teamCount},(_,i)=>({id:i+1,assigned:[],candidates:[],reports:[]}));
+  for(const pair of listed) teams[owner(pair)].assigned.push(pair);
+  const held=new Set(open.map(asset)), previous=new Set(recent.map(asset));
+  pool.sort((a,b)=>Number(previous.has(asset(a.candidate)))-Number(previous.has(asset(b.candidate))) ||
+    a.score-b.score || a.candidate.symbol.localeCompare(b.candidate.symbol));
+  for(const {candidate} of pool) {
+    if(!held.has(asset(candidate))) teams[owner(candidate)].candidates.push(candidate);
+  }
+  return {teams,at:scan.at,venues:scan.venues};
 }

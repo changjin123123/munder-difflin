@@ -85,14 +85,17 @@ export function registerTreasureDesk(allowed: () => WebContents | null, workers:
   ipcMain.handle('treasure:meeting',async(event,action:string,args:Record<string,string>={})=>{
     if (!room || event.sender!==allowed() || event.senderFrame!==event.sender.mainFrame ||
         !args || typeof args!=='object' || Object.values(args).some(v=>typeof v!=='string'||v.length>100)) throw new Error('허용되지 않은 회의 요청입니다.');
-    if (action==='marketStart') room.startMarket(args.engine as Engine,Number(args.minutes),Number(args.limit));
+    if (action==='buildingPrepare') room.prepareBuilding();
+    else if (action==='buildingStart') room.startBuilding(args.engine as Engine,Number(args.parallel),Number(args.perTeam));
+    else if (action==='buildingStop') room.stopBuilding();
+    else if (action==='marketStart') room.startMarket(args.engine as Engine,Number(args.minutes),Number(args.limit));
     else if (action==='start') room.start(args.venue as Venue,args.symbol,args.engine as Engine);
     else if (action==='autoStart') room.startAuto(args.venue as Venue,args.symbol,args.engine as Engine,Number(args.minutes),Number(args.limit));
     else if (action==='autoStop') room.stopAuto();
     else if (action==='cancel') room.cancel();
     else if (action==='close') await room.closeTrade(args.id);
     else if (action!=='view') throw new Error('지원하지 않는 회의 명령입니다.');
-    return room.view(action==='view'?args.id:undefined);
+    return room.view(action==='view'?args.id:undefined,args.team===undefined?undefined:Number(args.team));
   });
   app.on('will-quit', () => {room?.stop();engine?.stdin.end();});
 }

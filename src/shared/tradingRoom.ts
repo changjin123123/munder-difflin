@@ -42,6 +42,21 @@ export interface Meeting {
   sessionId?:string; finishedAt?:number;
   method?:'tradingagents-office-v1'; proposal?:Proposal;
   scan?:MarketScan;
+  team?:number; buildingId?:string;
+}
+export const floorCount=10, teamsPerFloor=4, teamCount=floorCount*teamsPerFloor;
+export function teamLabel(team:number) {return Math.ceil(team/teamsPerFloor)+'층 '+((team-1)%teamsPerFloor+1)+'팀';}
+export interface Instrument {venue:Venue;symbol:string}
+export interface BuildingTeam {
+  id:number; assigned:Instrument[]; candidates:MarketCandidate[];
+  reports:{id:string;symbol:string;venue:Venue;state:Meeting['state']}[];
+}
+export interface BuildingRun {
+  id:string;at:number;state:'scanning'|'ready'|'running'|'done'|'stopped'|'error';reason:string;
+  teams:BuildingTeam[];venues:MarketScan['venues'];parallel:number;perTeam:number;engine?:Engine;
+}
+export function teamTarget(t:BuildingTeam,limit:number) {
+  return limit===0?t.candidates.length:Math.min(limit,t.candidates.length);
 }
 export interface MarketCandidate {
   venue:Venue; symbol:string; change:number; turnover:number; turnoverRank:number; moveRank:number;
@@ -63,6 +78,9 @@ export interface Fill { id: string; venue: Venue; symbol: string; side: 'LONG'|'
   entry: number; qty: number; stop: number; take: number; opened: number; exit: number|null;
   pnl: number|null; closed: number|null; reason: string|null }
 export interface RoomView {
+  legacyActive:boolean;
+  building?:BuildingRun|null;
+  teamFunds?:{venue:Venue;cash:number;budget:number;open:number}[];
   currentFill?: Fill;
   current: Meeting|null; history: {id:string;symbol:string;state:string;created:number}[];
   trades: Fill[]; totals: {venue:Venue; cash:number; pnl:number; open:number}[];
