@@ -30,7 +30,7 @@ export interface NewsItem { id:string; source:string; publishedAt:number; title:
 export interface NewsEvent { summary:string; newsRefs:string[] }
 export const newsDebaters = ['bull','bear','reply','chair','audit','manager'] as const;
 export function citesNews(step:Step) { return newsDebaters.some(s=>s===step); }
-export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number; newsEvents?:NewsEvent[]; newsRefs?:string[] }
+export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number; confidencePct?:number; newsEvents?:NewsEvent[]; newsRefs?:string[] }
 export interface Quote { bid: number; ask: number; at: number; until: number }
 export type Proposal = {side:'HOLD'} | {side:'LONG'|'SHORT'; entry:number; stop:number; take:number; amount:number};
 export interface Evidence { venue: Venue; symbol: string; captured: number; quote: Quote;
@@ -53,6 +53,7 @@ export interface Fill { id: string; venue: Venue; symbol: string; side: 'LONG'|'
   entry: number; qty: number; stop: number; take: number; opened: number; exit: number|null;
   pnl: number|null; closed: number|null; reason: string|null }
 export interface RoomView {
+  currentFill?: Fill;
   current: Meeting|null; history: {id:string;symbol:string;state:string;created:number}[];
   trades: Fill[]; totals: {venue:Venue; cash:number; pnl:number; open:number}[];
   engines: Engine[]; officeReady: boolean; priceNotice: string; session:PaperSession|null;

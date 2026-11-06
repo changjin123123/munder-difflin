@@ -29,7 +29,7 @@ function fixture(options={}) {
     objectives[step]=objective;
     if (step===options.malformed) return '{}';
     const review=['growth','defense','neutral','audit'].includes(step);
-    return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2,
+    return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2,confidencePct:options.confidence,
       newsRefs:step===options.badCitation?['N99']:['N1'],newsEvents:options.emptyBrief?[]:[{summary:'동일 사건의 두 보도',newsRefs:['N1','N2']},
         {summary:'중복 후속보도',newsRefs:['N1']}]});
   }};
@@ -63,6 +63,21 @@ roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create
     const f=fixture(opts);t.after(()=>f.room.stop());
     const v=await f.run(venue);
     assert.equal(v.current.state,state);assert.equal(v.trades.length,0);
+  }
+});
+roomTest('the final card keeps manager self-assessment separate from execution and loads the matching historical fill',async t=>{
+  for (const value of [0,100,71,undefined,null,101,-1,70.4,'90']) {
+    const f=fixture({confidence:value});t.after(()=>f.room.stop());
+    const view=await f.run(), id=view.current.id;
+    assert.equal(view.current.state,'approved');
+    const expected=Number.isInteger(value) && value>=0 && value<=100?value:undefined;
+    assert.equal(view.current.answers.manager.confidencePct,expected);
+    assert.equal(view.current.answers.bull.confidencePct,undefined);
+    assert.deepEqual(view.currentFill,view.trades[0]);
+    const noFill=await f.run();
+    assert.equal(noFill.current.state,'hold');assert.equal(noFill.currentFill,undefined);
+    assert.equal(noFill.current.answers.manager.verdict,'LONG');
+    assert.equal(f.room.view(id).currentFill.id,id);
   }
 });
 roomTest('each risk reviewer sees the trader proposal and earlier reviews before the manager decides',async t=>{

@@ -57,6 +57,7 @@ export class RoomWorkerPool implements RoomWorkers {
     const properties:Record<string,object>={verdict:{type:'string',enum:choices(job.step)},note:{type:'string'},
       line:{type:'string'},replyTo:{type:['string','null']}};
     const newsRefs={type:'array',items:{type:'string'}};
+    if (job.step==='manager') properties.confidencePct={type:['integer','null'],minimum:0,maximum:100};
     if (citesNews(job.step)) properties.newsRefs=newsRefs;
     if (job.step==='news') properties.newsEvents={type:'array',items:{type:'object',
       properties:{summary:{type:'string'},newsRefs},required:['summary','newsRefs'],additionalProperties:false}};

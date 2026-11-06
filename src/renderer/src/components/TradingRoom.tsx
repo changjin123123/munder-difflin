@@ -54,7 +54,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     <p className="rm-help">{view && !view.officeReady?'사무실 탭에서 작업공간 설정을 마치세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
     {error && <p role="alert" className="rm-alert">{error}</p>}
     {m && <MeetingMarket meeting={m}/>}
-    <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.trades.find(t=>t.id===m?.id)}/>
+    <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.currentFill??view?.trades.find(t=>t.id===m?.id)}/>
     {m && <MeetingNews meeting={m}/>}
     {m?.method==='tradingagents-office-v1' && m.proposal && <section className="rm-review" aria-label="거래 계획과 심사">
       <h3>필리스의 거래 계획과 3인 심사</h3>

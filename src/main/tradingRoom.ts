@@ -25,6 +25,9 @@ function parseAnswer(text:string, step:Step, evidence:Evidence): Answer {
   if (!a || !choices(step).includes(a.verdict) || typeof a.note!=='string' ||
       a.note.trim().length<4 || a.note.length>1400) throw new Error('응답 형식 또는 근거가 유효하지 않습니다.');
   const answer: Answer={verdict:a.verdict,note:a.note.trim()};
+  if (step==='manager' && Number.isInteger(a.confidencePct) && a.confidencePct>=0 && a.confidencePct<=100) {
+    answer.confidencePct=a.confidencePct;
+  }
   recordNews(step,a,answer,evidence.news??[]);
   if (typeof a.line==='string' && a.line.trim().length>0 && a.line.trim().length<=200) answer.line=a.line.trim();
   if (rounds.flat().includes(a.replyTo)) answer.replyTo=a.replyTo;
@@ -130,7 +133,9 @@ export class TradingRoom {
   }
   view(id?:string): RoomView {
     const found=id ? this.db.prepare('SELECT body FROM meetings WHERE id=?').get(id) as {body:string}|undefined : undefined;
-    return {current:found?JSON.parse(found.body):this.current,
+    const current:Meeting|null=found?JSON.parse(found.body):this.current;
+    const currentFill=current?.state==='approved' ? this.db.prepare('SELECT * FROM trades WHERE id=?').get(current.id) as Fill|undefined : undefined;
+    return {current,currentFill,
       history:this.db.prepare("SELECT id,created,json_extract(body,'$.symbol') symbol,json_extract(body,'$.state') state FROM meetings ORDER BY created DESC LIMIT 40").all() as RoomView['history'],
       trades:this.db.prepare('SELECT * FROM trades ORDER BY (closed IS NULL) DESC,opened DESC LIMIT 100').all() as Fill[],
       totals:[this.totals('bithumb'),this.totals('bingx')],engines:this.workers.engines(),officeReady:this.workers.ready(),priceNotice:this.priceNotice,session:this.session};
@@ -197,6 +202,7 @@ export class TradingRoom {
             '의장 토론 결론을 읽은 트레이더가 먼저 모의 거래 계획을 작성한다. 이후 공격적·보수적·중립 심사역이 차례로 같은 계획과 앞선 심사를 검토한다. 위험·비용과 계획의 손절·익절을 대조해 구체적으로 찬반을 말하고 수정이 필요하면 VETO로 보류한다. 트레이더 제안이 HOLD이면 진입 계획은 없다. 검증 뒤 매니저가 각 심사 의견을 근거로 최종 결정한다. 의장·트레이더가 관망하거나 심사 한 명이라도 기각하면 신규 모의 진입은 없다.',
             m.proposal?'필리스의 구조화된 제안 (최초 호가 기준 예상치) '+JSON.stringify(m.proposal):'',
             '완료 메시지 body에 JSON 문자열 하나만 반환. verdict 허용값 '+choices(step).join('/')+'; note에는 자료 근거와 반대 조건을 최대 500자로 기록.',
+            step==='manager'?'confidencePct에 본인이 선택한 방향(관망 포함)에 대한 주관적 확신을 0~100 정수로 기록한다. 판단할 근거가 없으면 null. 이 수치는 승률 예측이 아니며 승인 기준으로 사용하지 않는다.':'',
             step==='trader'?'진입 방향이면 stopPct (0.3~5), takePct (stopPct~15)를 숫자로 포함. 진입 예상가는 기준 호가, 최종 체결가는 승인 시의 새 호가.':''
           ].join('\n');
           const body=await this.workers.ask(m.id,step,m.engine,objective);
