@@ -3,7 +3,9 @@ import { castNames, seats, repeatLimits, repeatMinutes, type Engine, type RoomVi
 import type { Venue } from '../../../shared/treasure';
 import { TradingOffice } from './TradingOffice';
 import { MeetingNews } from './MeetingNews';
+import { MeetingMarket } from './MeetingMarket';
 import './tradingRoom.css';
+import './tradingTerminal.css';
 
 const labels:Record<string,string>={active:'회의 중',approved:'모의 체결',hold:'관망',error:'중단',cancelled:'취소',LONG:'매수',SHORT:'매도·숏',HOLD:'관망',PASS:'통과',VETO:'기각'};
 const cash=(v:number|null,ccy:string)=>v==null?'—':v.toLocaleString('ko-KR',{maximumFractionDigits:ccy==='KRW'?1:4})+' '+ccy;
@@ -35,8 +37,6 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     catch(e){setError(String(e).replace(/^.*?Error: /,''));} finally{setBusy(false);}
   }
   const m=view?.current;
-  const tech=m?.evidence?.sources.technical as {closes?: number[]}|null;
-  const closes=tech?.closes??[], low=Math.min(...closes), high=Math.max(...closes);
   const openMeeting=view?.history.some(h=>h.state==='active');
   const session=view?.session;
   const repeating=session?.state==='running' || session?.state==='waiting';
@@ -44,6 +44,16 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
   return <section className="rm-wrap">
     <header><div><h2>트레이딩 사무실</h2></div>
       <select aria-label="회의 기록" value={history} onChange={e=>setHistory(e.target.value)}><option value="">현재 회의</option>{view?.history.map(r=><option key={r.id} value={r.id}>{clock(r.created)} · {r.symbol} · {labels[r.state]}</option>)}</select></header>
+    <div className="rm-controls">
+      <label>거래소<select value={venue} onChange={e=>{const v=e.target.value as Venue;setVenue(v);setSymbol(v==='bithumb'?'KRW-BTC':'BTC-USDT');}}><option value="bithumb">빗썸 현물</option><option value="bingx">빙엑스 선물</option></select></label>
+      <label>종목<input aria-label="회의 종목" maxLength={40} value={symbol} onChange={e=>setSymbol(e.target.value.trim().toUpperCase())}/></label>
+      <label>사무실 엔진<select aria-label="회의 엔진" value={engine??''} onChange={e=>setEngine(e.target.value as Engine)}>{!view?.engines.length && <option value="">사용 가능 엔진 없음</option>}{view?.engines.map(p=><option key={p}>{p}</option>)}</select></label>
+      <button className="rm-start" disabled={!canStart} onClick={()=>void act('start',{venue,symbol,engine:engine!})}>13인 회의 시작</button>
+      {openMeeting && !repeating && <button disabled={busy} onClick={()=>void act('cancel')}>진행 중인 회의 중지</button>}
+    </div>
+    <p className="rm-help">{view && !view.officeReady?'사무실 탭에서 작업공간 설정을 마치세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
+    {error && <p role="alert" className="rm-alert">{error}</p>}
+    {m && <MeetingMarket meeting={m}/>}
     <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.trades.find(t=>t.id===m?.id)}/>
     {m && <MeetingNews meeting={m}/>}
     {m?.method==='tradingagents-office-v1' && m.proposal && <section className="rm-review" aria-label="거래 계획과 심사">
@@ -55,15 +65,6 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
         return a && <p key={step}><b>{castNames[step]} · {seats.find(s=>s[0]===step)![1]} · {labels[a.verdict]}</b> {a.line||a.note}</p>;
       })}
     </section>}
-    <div className="rm-controls">
-      <label>거래소<select value={venue} onChange={e=>{const v=e.target.value as Venue;setVenue(v);setSymbol(v==='bithumb'?'KRW-BTC':'BTC-USDT');}}><option value="bithumb">빗썸 현물</option><option value="bingx">빙엑스 선물</option></select></label>
-      <label>종목<input aria-label="회의 종목" maxLength={40} value={symbol} onChange={e=>setSymbol(e.target.value.trim().toUpperCase())}/></label>
-      <label>사무실 엔진<select aria-label="회의 엔진" value={engine??''} onChange={e=>setEngine(e.target.value as Engine)}>{!view?.engines.length && <option value="">사용 가능 엔진 없음</option>}{view?.engines.map(p=><option key={p}>{p}</option>)}</select></label>
-      <button className="rm-start" disabled={!canStart} onClick={()=>void act('start',{venue,symbol,engine:engine!})}>13인 회의 시작</button>
-      {openMeeting && !repeating && <button disabled={busy} onClick={()=>void act('cancel')}>진행 중인 회의 중지</button>}
-    </div>
-    <p className="rm-help">{view && !view.officeReady?'사무실 탭에서 작업공간 설정을 마치세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
-    {error && <p role="alert" className="rm-alert">{error}</p>}
     <section className="rm-auto" aria-label="자동 모의 테스트">
       <h3>자동 모의 테스트</h3>
       <div className="rm-controls">
@@ -80,8 +81,6 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
         <div>{session.meetings.map((id,i)=><button key={id} onClick={()=>setHistory(id)}>{i+1}회차 회의록</button>)}</div>
       </div>}
     </section>
-    {closes.length>1 && <div className="rm-chart"><div>15분 확정봉 · 종가 <small>{clock(m!.evidence!.captured*1000)} 수집</small></div>
-      <svg viewBox="0 0 300 45" role="img" aria-label="최근 32개 확정봉 종가 추이"><polyline fill="none" stroke="currentColor" strokeWidth="2" points={closes.map((p,i)=>i*300/(closes.length-1)+','+(42-39*(p-low)/(high-low||1))).join(' ')}/></svg></div>}
     {m?.evidence && <details><summary>회의에서 사용한 시세와 자료</summary>
       <p>{clock(m.evidence.captured*1000)} · {venueName(m.venue)} 매수 1호가 {cash(m.evidence.quote.bid,currency(m.venue))} · 매도 1호가 {cash(m.evidence.quote.ask,currency(m.venue))}</p>
       <p>출처는 거래소 15분 확정봉, CoinGecko 프로젝트 지표, Alternative.me 비트코인 심리지수, 블록미디어와 CoinDesk입니다. 누락된 자료 {m.evidence.missing.join(', ') || '없음'}</p>

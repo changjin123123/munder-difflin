@@ -11,19 +11,19 @@ export function NewsRefs({items,refs}:{items?:NewsItem[];refs?:string[]}) {
 }
 export function MeetingNews({meeting:m}:{meeting:Meeting}) {
   const items=m.evidence?.news;
-  if (!items) return null;
+  if (!items && !m.answers.bull && !m.answers.bear) return null;
   const events=m.answers.news?.newsEvents??[];
   return <section className="rm-news" aria-label="뉴스 브리핑과 토론">
-    <div className="rm-news-head"><h3>뉴스 브리핑과 토론</h3><small>최근 24시간 · 관련 기사 {items.length}건</small></div>
-    {!items.length?<p>종목·시장 관련 기사를 확보하지 못해 이번 회의의 신규 모의 진입을 보류합니다.</p>:
-      !events.length?<p>{!m.answers.news && m.state==='active'?'켈리가 기사들을 사건별로 정리하고 있습니다.':'원문 근거가 확인된 뉴스 종합이 없습니다.'}</p>:
-      <ul>{events.map(e=><li key={e.newsRefs[0]}>{e.summary} <NewsRefs items={items} refs={e.newsRefs}/></li>)}</ul>}
-    {(['bull','bear','reply','manager'] as const).map(step=>{
+    <div className="rm-news-head"><h3>강세·약세 토론</h3>{items && <small>최근 24시간 · 관련 기사 {items.length}건</small>}</div>
+    <div className="rm-debate-grid">{(['bull','bear','reply','manager'] as const).map(step=>{
       const answer=m.answers[step];
-      return answer && <div className="rm-news-turn" key={step}><b>{castNames[roleFor(step)]} · {{bull:'강세',bear:'약세',reply:'재반론',manager:'최종 판단'}[step]}</b>
+      return answer && <div className={'rm-news-turn rm-turn-'+step} key={step}><b>{castNames[roleFor(step)]} · {{bull:'강세 근거',bear:'약세 근거',reply:'재반론',manager:'최종 판단'}[step]}</b>
         <span>{answer.line||answer.note} <NewsRefs items={items} refs={answer.newsRefs}/></span></div>;
-    })}
-    {!!items.length && <details><summary>수집한 기사 원문과 발행 시각</summary>{items.map(item=><article key={item.id}>
+    })}</div>
+    {items && <><h4>켈리의 뉴스 브리핑</h4>{!items.length?<p>종목·시장 관련 기사를 확보하지 못해 이번 회의의 신규 모의 진입을 보류합니다.</p>:
+      !events.length?<p>{!m.answers.news && m.state==='active'?'켈리가 기사들을 사건별로 정리하고 있습니다.':'원문 근거가 확인된 뉴스 종합이 없습니다.'}</p>:
+      <ul>{events.map(e=><li key={e.newsRefs[0]}>{e.summary} <NewsRefs items={items} refs={e.newsRefs}/></li>)}</ul>}</>}
+    {!!items?.length && <details><summary>수집한 기사 원문과 발행 시각</summary>{items.map(item=><article key={item.id}>
       <small>{item.id} · {item.source} · {published(item)} · {item.scope==='asset'?'종목 관련':'시장 전체'} · {item.summary?'RSS 요약':'제목만 제공'}</small>
       <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>{item.summary && <p>{item.summary}</p>}
     </article>)}</details>}
