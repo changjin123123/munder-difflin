@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { request as httpsRequest } from 'node:https';
 import { PtyManager, type SpawnOptions } from './pty';
 import { registerTreasureDesk, treasureEdition } from './treasureDesk';
+import { RoomWorkerPool } from './roomWorkers';
 import { resolveCommand as resolveCliCommand, isSafeCommandName } from './shellEnv';
 import { initAutoUpdater, abortPendingRestart } from './updater';
 import { RealtimeFloorWatcher } from './realtimeFloorWatcher';
@@ -442,6 +443,11 @@ const preservedWorktrees = new Map<string, PreservedWorktree>();
  * handler or node-pty's onExit).
  */
 function teardownPty(id: string): void {
+  const roomRecord=liveWorkers.get(id);
+  if (roomRecord?.reqId.startsWith('room-')) {
+    const done=workerCompletion(id,roomRecord.spawnedAt);
+    roomWorkers.end(roomRecord.reqId,done?.body);
+  }
   // Ephemeral-worker flag, read BEFORE the cleanup below deletes the entry. All
   // worker deaths (done-release, idle/token reap, manual stop, crash) funnel
   // through here, so this is the one place their floor card gets archived
@@ -4656,11 +4662,11 @@ function archiveRequest(filePath: string, sub: '.done' | '.failed'): void {
  *  own timestamp), falling back to the file's mtime when `created_at` is missing
  *  or unparseable. When neither yields a usable timestamp we DON'T count it
  *  (fail toward keeping the worker alive — the idle reaper is the backstop). */
-function workerDoneAt(workerId: string, spawnedAt: number): number | null {
+function workerCompletion(workerId: string, spawnedAt: number): {at:number;body?:string}|null {
   const root = hive.root();
   if (!root) return null;
   const base = join(root, 'agents', workerId, 'outbox');
-  let doneAt: number | null = null;
+  let done: {at:number;body?:string}|null = null;
   for (const dir of [base, join(base, '.sent')]) {
     if (!existsSync(dir)) continue;
     let files: string[];
@@ -4669,17 +4675,17 @@ function workerDoneAt(workerId: string, spawnedAt: number): number | null {
       if (!f.endsWith('.json')) continue;
       const fp = join(dir, f);
       try {
-        const msg = JSON.parse(readFileSync(fp, 'utf8')) as { act?: string; created_at?: string };
+        const msg = JSON.parse(readFileSync(fp, 'utf8')) as { act?: string; created_at?: string; body?: unknown };
         if (msg.act !== 'done') continue;
         let ts = Date.parse(msg.created_at ?? '');
         if (!Number.isFinite(ts)) {
           try { ts = statSync(fp).mtimeMs; } catch { ts = NaN; }
         }
-        if (Number.isFinite(ts) && ts > spawnedAt && (doneAt === null || ts > doneAt)) doneAt = ts;
+        if (Number.isFinite(ts) && ts > spawnedAt && (!done || ts>done.at)) done={at:ts,body:typeof msg.body==='string'?msg.body:undefined};
       } catch { /* skip unreadable/partial */ }
     }
   }
-  return doneAt;
+  return done;
 }
 
 /** Spin up one ephemeral worker from a spawn-request. Terminal failures (bad
@@ -4687,7 +4693,7 @@ function workerDoneAt(workerId: string, spawnedAt: number): number | null {
  *  Slack coords so god can post a 'couldn't start' reply. On success the worker is
  *  registered (for done-scan / reaping / safe teardown) and dispatched its
  *  objective via the standard inbox path. */
-async function processSpawnRequest(filePath: string): Promise<void> {
+async function processSpawnRequest(filePath: string, roomId?:string): Promise<void> {
   let raw: SpawnRequest;
   try {
     raw = JSON.parse(readFileSync(filePath, 'utf8')) as SpawnRequest;
@@ -4700,7 +4706,8 @@ async function processSpawnRequest(filePath: string): Promise<void> {
   const slack = raw.slack && typeof raw.slack.channel === 'string' && typeof raw.slack.thread_ts === 'string'
     ? { channel: raw.slack.channel, thread_ts: raw.slack.thread_ts } : undefined;
   const fail = (reason: string): void => {
-    informGod(`[worker spawn rejected] ${reason}`, `Spawn-request ${basename(filePath)} rejected: ${reason}.`, slack);
+    if (roomId) roomWorkers.end(roomId,undefined,reason);
+    else informGod(`[worker spawn rejected] ${reason}`, `Spawn-request ${basename(filePath)} rejected: ${reason}.`, slack);
     archiveRequest(filePath, '.failed');
   };
 
@@ -4761,7 +4768,7 @@ async function processSpawnRequest(filePath: string): Promise<void> {
   // the loopback secret broker without ever seeing a credential. Only when the broker
   // is up; the grant is revoked in teardownPty (and below if the spawn fails).
   const brokerEnv: Record<string, string> = {};
-  if (integrationBroker.running()) {
+  if (!roomId && integrationBroker.running()) {
     const token = integrationBroker.grant(workerId, integrations.enabledIds());
     brokerEnv.MD_BROKER_URL = integrationBroker.url();
     brokerEnv.MD_BROKER_TOKEN = token;
@@ -4817,7 +4824,8 @@ async function processSpawnRequest(filePath: string): Promise<void> {
       ? buildAutonomousRequestProtocol(slack.channel, slack.thread_ts, slackReplyScriptPath())
       : '[AUTONOMOUS WORKER TASK — no interactive human is watching. Work autonomously; do not ask interactive questions.] The task starts now: ';
     const suffix = `\n\n[CAPABILITIES] Before you start, consult your capability catalog — run the \`/capabilities\` skill (or read \`$AGENT_DIR/.claude/skills/capabilities/SKILL.md\`). It lists your temporal date-range skills (\`/today\`, \`/last30Days\`, \`/lastQuarter\`, …) and the integrations available to you (reached via the loopback broker) and how to call each. For any time-scoped work, resolve the dates with those skills instead of computing them by hand.\n\n[WORKER COMPLETION] When finished, signal done by sending ONE outbox message to god with "act":"done" and a short result summary — that releases this ephemeral worker (terminal closed; your branch is handed to god). Do NOT push to any remote; god is the sole integrator.`;
-    hive.send({ to: workerId, conversation: `worker-${reqId}`, act: 'request', subject: meta.name, body: `${prefix}${objective}${suffix}` }, 'god');
+    const roomSuffix='\nReturn the answer through your normal hive outbox as ONE message to god, act "done". The body must be a STRING containing the requested JSON only. Do not use integrations or post to outside services.';
+    hive.send({ to: workerId, conversation: `worker-${reqId}`, act: 'request', subject: meta.name, body: roomId?objective+roomSuffix:`${prefix}${objective}${suffix}` }, 'god');
   } catch (e) {
     console.error('[worker] dispatch send failed:', e);
   }
@@ -4909,8 +4917,10 @@ async function ephemeralWorkerTick(): Promise<void> {
     //     worker-qa/worker-bizreview). A double teardown is a harmless no-op.
     for (const [workerId, rec] of [...liveWorkers]) {
       if (rec.releasing) continue;
-      const doneAt = workerDoneAt(workerId, rec.spawnedAt);
+      const done=workerCompletion(workerId,rec.spawnedAt);
+      const doneAt=done?.at ?? null;
       if (doneAt !== null) {
+        if (rec.reqId.startsWith('room-')) roomWorkers.end(rec.reqId,done?.body);
         // Success: the worker already replied in-thread; just release it.
         rec.releasing = true;
         console.log(`[worker] ${workerId} signaled done — releasing`);
@@ -4995,12 +5005,13 @@ async function ephemeralWorkerTick(): Promise<void> {
     //     Declining also means declining to CONSUME. A request dropped in while
     //     this is off stays in the queue and runs when it is turned on, rather
     //     than being eaten and failed for a reason god never asked about.
+    await roomWorkers.pump(()=>liveWorkers.size+roomWorkers.batchCount()<maxWorkers,processSpawnRequest);
     const dir = readConfig().orchestratorMaySpawn ? spawnRequestsDir() : null;
     if (dir && existsSync(dir)) {
       let files: string[] = [];
       try { files = readdirSync(dir).filter(f => f.endsWith('.json')).sort(); } catch { /* dir vanished */ }
       for (const f of files) {
-        if (liveWorkers.size >= maxWorkers) break;
+        if (liveWorkers.size+roomWorkers.batchCount() >= maxWorkers) break;
         await processSpawnRequest(join(dir, f));
       }
     }
@@ -5373,8 +5384,10 @@ function onSystemResume(reason: string): void {
   }, 15_000);
 }
 
+const roomWorkers=new RoomWorkerPool(()=>hive.enabled()?hive.root():null,bin=>ptyManager.commandPath(bin),
+  id=>{if(liveWorkers.has(id)){ptyManager.kill(id);teardownPty(id);}});
 app.whenReady().then(() => {
-  registerTreasureDesk(liveWebContents);
+  registerTreasureDesk(liveWebContents,roomWorkers);
   // Realtime Michael mic-gate hygiene (rt-8 / Pam rt-10 nit): the voice session
   // opens the mic permission gate by persisting realtimeVoiceEnabled=true and
   // closes it on disconnect — but a hard crash/reload mid-session skips that

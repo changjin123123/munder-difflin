@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Headlines, Markets, PaperResults, PaperStatus, Venue } from '../../../shared/treasure';
 import { App } from '../App';
 import './treasure.css';
+import { TradingRoomPanel } from './TradingRoom';
 
 const names = { bithumb: '빗썸', bingx: '빙엑스' };
 const states: Record<string,string> = { stopped:'중지', running:'실행 중', starting:'시작 중', stopping:'중지 중', failed:'오류', unavailable:'모의 모드 확인 필요' };
@@ -21,10 +22,12 @@ function Desk() {
   const [term,setTerm] = useState('');
   const [offset,setOffset] = useState(0);
   const [revision,refresh] = useState(0);
-  const [page,setPage] = useState<'markets'|'news'|'results'>('markets');
+  const [page,setPage] = useState<'markets'|'news'|'results'|'room'>('markets');
+  const [meetingSymbol,setMeetingSymbol] = useState('');
   const limit = 20;
 
   useEffect(() => {
+    if (page==='room') return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     setMarkets(undefined);
@@ -68,24 +71,25 @@ function Desk() {
   const bothRunning = status?.venues.every(v=>['running','starting'].includes(v.state));
   return <main className="tb-desk">
     <header className="tb-head"><div><h1>보물공방</h1><p>빗썸 원화 현물 · 빙엑스 USDT 무기한선물</p></div>
-      <div className="tb-actions"><button disabled={!canControl || busy || bothRunning} onClick={()=>void control(true)}>전체 종목 모의 시작</button>
-      <button disabled={!canControl || busy || !running} onClick={()=>void control(false)}>모의 중지</button></div>
+      {page!=='room' && <div className="tb-actions"><button disabled={!canControl || busy || bothRunning} onClick={()=>void control(true)}>전체 종목 모의 시작</button>
+      <button disabled={!canControl || busy || !running} onClick={()=>void control(false)}>모의 중지</button></div>}
     </header>
-    <section className="tb-status" aria-label="모의매매 상태">{(['bithumb','bingx'] as const).map(v=>{
+    {page!=='room' && <section className="tb-status" aria-label="모의매매 상태">{(['bithumb','bingx'] as const).map(v=>{
       const s=status?.venues.find(row=>row.venue===v);
       return <div key={v}><strong>{names[v]}</strong><span className={s?.state==='running'?'tb-running':''}>{s ? states[s.state] ?? s.state : '연결 중'}</span>
         <small>{s?.error || s?.profile || ''}</small></div>;
-    })}</section>
-    {(error || controlError) && <div role="alert" className="tb-error">{controlError || error} <button onClick={()=>refresh(n=>n+1)}>다시 조회</button></div>}
-    <nav className="tb-tabs" aria-label="보물공방 화면">{(['markets','news','results'] as const).map((key,i)=>
-      <button key={key} aria-pressed={page===key} onClick={()=>setPage(key)}>{['전체 시세','최신 뉴스','모의 장부'][i]}</button>)}</nav>
+    })}</section>}
+    {page!=='room' && (error || controlError) && <div role="alert" className="tb-error">{controlError || error} <button onClick={()=>refresh(n=>n+1)}>다시 조회</button></div>}
+    <nav className="tb-tabs" aria-label="보물공방 화면">{(['markets','news','results','room'] as const).map((key,i)=>
+      <button key={key} aria-pressed={page===key} onClick={()=>setPage(key)}>{['전체 시세','최신 뉴스','모의 장부','트레이딩 회의실'][i]}</button>)}</nav>
+    {page==='room' && <TradingRoomPanel initialVenue={venue} initialSymbol={meetingSymbol || (venue==='bithumb'?'KRW-BTC':'BTC-USDT')}/>}
     {page==='markets' && <>
-      <div className="tb-filters"><select aria-label="거래소" value={venue} onChange={e=>{setOffset(0);setVenue(e.target.value as Venue);}}>
+      <div className="tb-filters"><select aria-label="거래소" value={venue} onChange={e=>{setOffset(0);setMeetingSymbol('');setVenue(e.target.value as Venue);}}>
         <option value="bithumb">빗썸 · KRW</option><option value="bingx">빙엑스 · USDT</option></select>
         <input aria-label="코인 검색" placeholder="종목명 또는 심볼 검색" value={term} maxLength={100} onChange={e=>{setOffset(0);setTerm(e.target.value);}}/>
         <span>{markets ? markets.total.toLocaleString('ko-KR')+'종목' : '조회 중'}</span></div>
       <div className="tb-grid"><table><thead><tr><th>종목</th><th>현재가 ({venue==='bithumb'?'KRW':'USDT'})</th><th>등락률</th><th>24시간 거래대금</th><th>모의 후보</th></tr></thead>
-        <tbody>{markets?.items.map(m=><tr key={m.symbol}><td><b>{m.symbol}</b><small>{m.name!==m.symbol?m.name:''}</small></td><td title={m.quoted_at ? when(m.quoted_at):''}>{fmt(m.price)}</td>
+        <tbody>{markets?.items.map(m=><tr key={m.symbol}><td><button title="이 종목의 회의실 열기" onClick={()=>{setMeetingSymbol(m.symbol);setPage('room');}}>{m.symbol}</button><small>{m.name!==m.symbol?m.name:''}</small></td><td title={m.quoted_at ? when(m.quoted_at):''}>{fmt(m.price)}</td>
           <td className={(m.change_pct??0)>0?'tb-up':(m.change_pct??0)<0?'tb-down':''}>{m.change_pct==null?'—':m.change_pct.toFixed(2)+'%'}</td>
           <td>{m.turnover_24h==null?'—':Math.round(m.turnover_24h).toLocaleString('ko-KR')}</td><td>{m.paper_eligible?'가능':'제외'}</td></tr>)}</tbody></table></div>
       {!markets?.items.length && <p>{markets?.sources[venue]?.includes('실패') ? markets.sources[venue] : markets && !Object.values(markets.sources).some(s=>s.includes('조회 중')) ? '조건에 맞는 종목이 없습니다.' : '거래소에서 시세를 불러오는 중입니다.'}</p>}

@@ -3,6 +3,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { TradingRoom, type RoomWorkers } from './tradingRoom';
+import type { Venue } from '../shared/treasure';
+import type { Engine } from '../shared/tradingRoom';
 
 const assets = join(process.resourcesPath, 'treasure');
 const python = join(assets, 'python', 'python.exe');
@@ -23,7 +26,7 @@ function dataHome(): string {
   return join(app.getPath('userData'), 'treasure-engine');
 }
 
-export function registerTreasureDesk(allowed: () => WebContents | null): void {
+export function registerTreasureDesk(allowed: () => WebContents | null, workers:RoomWorkers): void {
   let engine: ChildProcessWithoutNullStreams | undefined;
   let nextId = 0;
   const pending = new Map<number, Waiter>();
@@ -60,6 +63,9 @@ export function registerTreasureDesk(allowed: () => WebContents | null): void {
         !routes.has(path) || !params || typeof params !== 'object' || Array.isArray(params) ||
         !Object.entries(params).every(([k,v]) => path === 'markets' && ['venue','q','limit','offset'].includes(k)
           && typeof v === 'string' && v.length <= 128)) throw new Error('허용되지 않은 요청입니다.');
+    return request(path,params);
+  });
+  function request(path:string,params:object):Promise<unknown> {
     if (pending.size >= 24) throw new Error('조회 대기 중입니다. 잠시 후 다시 시도하세요.');
     const child = getEngine();
     const id = ++nextId;
@@ -67,13 +73,23 @@ export function registerTreasureDesk(allowed: () => WebContents | null): void {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error('응답 대기 시간이 지났습니다. 현재 상태를 다시 조회하세요.'));
-      }, 18000);
+      }, path.startsWith('room/')?55000:18000);
       pending.set(id, {
         finish: value => { clearTimeout(timer); resolve(value); },
         fail: error => { clearTimeout(timer); reject(error); }
       });
       child.stdin.write(JSON.stringify({id,path,params}) + '\n');
     });
+  }
+  const room=treasureEdition ? new TradingRoom(join(app.getPath('userData'),'trading-room.sqlite'),request,workers):null;
+  ipcMain.handle('treasure:meeting',async(event,action:string,args:Record<string,string>={})=>{
+    if (!room || event.sender!==allowed() || event.senderFrame!==event.sender.mainFrame ||
+        !args || typeof args!=='object' || Object.values(args).some(v=>typeof v!=='string'||v.length>100)) throw new Error('허용되지 않은 회의 요청입니다.');
+    if (action==='start') room.start(args.venue as Venue,args.symbol,args.engine as Engine);
+    else if (action==='cancel') room.cancel();
+    else if (action==='close') await room.closeTrade(args.id);
+    else if (action!=='view') throw new Error('지원하지 않는 회의 명령입니다.');
+    return room.view(action==='view'?args.id:undefined);
   });
-  app.on('will-quit', () => engine?.stdin.end());
+  app.on('will-quit', () => {room?.stop();engine?.stdin.end();});
 }
