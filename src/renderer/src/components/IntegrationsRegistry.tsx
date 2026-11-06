@@ -244,7 +244,9 @@ export function IntegrationsRegistry() {
   // ───────────────────────── CONFIGURE ─────────────────────────
   if (view === 'configure' && draft) {
     const g = glyphFor(draft.kind, draft.label);
-    const tpl = templates.find((t) => t.kind === draft.kind);
+    const tpl = templates.find((t) => t.idSuggestion === picked)
+      ?? templates.find((t) => t.kind === draft.kind && t.baseUrl === draft.baseUrl)
+      ?? templates.find((t) => t.kind === draft.kind);
     const secretLabel = tpl?.secretLabel || 'Secret';
     const showSavedPill = !draft.isNew && draft.hasSecret && !replacing;
     const isUsable = usable(draft);
@@ -374,7 +376,8 @@ export function IntegrationsRegistry() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {records.map((r) => {
               const g = glyphFor(r.kind, r.label);
-              const tpl = templates.find((t) => t.kind === r.kind);
+              const tpl = templates.find((t) => t.kind === r.kind && t.baseUrl === r.baseUrl)
+                ?? templates.find((t) => t.kind === r.kind);
               const st = !r.enabled
                 ? { dot: '○', color: 'var(--cth-ink-500)', text: tr('integrations.disabled') }
                 : needsSecret(r.authType) && !r.hasSecret

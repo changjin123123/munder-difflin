@@ -256,6 +256,15 @@ export const INTEGRATION_TEMPLATES: IntegrationTemplate[] = [
     secretHelp: 'Point baseUrl at any REST API. Choose how its credential is sent: Bearer token, a custom header, or none.',
     idSuggestion: 'my-api'
   },
+  {
+    kind: 'custom-rest',
+    label: 'Treasure Bot',
+    baseUrl: 'http://127.0.0.1:18765/treasure/v1',
+    authType: 'bearer',
+    secretLabel: 'Treasure Bot office token',
+    secretHelp: 'Copy the office token from the bot dashboard, enable the local connection, then save and test. Workers can read status, markets, news and paper/results, and POST paper/start or paper/stop.',
+    idSuggestion: 'treasure-bot'
+  },
 
   // ─── First-wave YC tools (Dwight, P2) ───────────────────────────────────────
   // Per-tool auth model + high-value endpoint catalog: hive/docs/integration-templates.md.
