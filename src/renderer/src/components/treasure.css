@@ -3,7 +3,6 @@
 .tb-switch strong{margin-right:16px;letter-spacing:.02em}.tb-shell button,.tb-shell input,.tb-shell select{font:inherit}
 .tb-switch button,.tb-desk button{cursor:pointer;border:1px solid #d6cdbd;background:#fffefa;border-radius:5px;padding:6px 14px}
 .tb-switch button{-webkit-app-region:no-drag;border-color:transparent;color:#efdfc3;background:transparent}.tb-switch button[aria-pressed=true]{background:#f5e1b8;color:#36291c}
-.tb-office{flex:1;min-height:0;position:relative;transform:translateZ(0);overflow:hidden}.tb-office>div:first-child{height:100%!important}
 .tb-desk{width:100%;max-width:1360px;box-sizing:border-box;margin:0 auto;padding:26px clamp(18px,4vw,58px);flex:1;min-height:0;overflow:auto;color:#29231f}
 .tb-desk h1,.tb-desk h2,.tb-desk p{margin:0}.tb-head,.tb-actions,.tb-filters,.tb-tabs,.tb-desk footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .tb-head{justify-content:space-between;margin-bottom:18px}.tb-head h1{font-size:30px;font-weight:750;letter-spacing:-.04em}.tb-head p,.tb-desk small,.tb-desk footer,.tb-filters span{color:#665d50}.tb-actions button:first-child{background:#68472b;color:white;border-color:#68472b}

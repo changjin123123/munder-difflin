@@ -158,7 +158,7 @@ export class TradingRoom {
     if(this.current?.state==='active' && this.current.sessionId===this.session?.id) this.cancel();
   }
   private begin(venue:Venue,symbol:string,engine:Engine,s?:PaperSession) {
-    if (!this.workers.ready()) throw new Error('사무실의 첫 설정을 먼저 마치세요.');
+    if (!this.workers.ready()) throw new Error('회의 작업 폴더를 준비할 수 없습니다. 앱 데이터 폴더의 쓰기 권한을 확인하세요.');
     if (!this.workers.engines().includes(engine)) throw new Error('선택한 사무실 엔진을 설치하고 로그인하세요.');
     if (this.current?.state==='active') throw new Error('이미 회의가 진행 중입니다.');
     if (!(venue==='bithumb'?/^KRW-[A-Z0-9]{1,30}$/:venue==='bingx'?/^[A-Z0-9]{1,30}-USDT$/:/^(?!)$/).test(symbol)) throw new Error('거래소 종목을 확인하세요.');

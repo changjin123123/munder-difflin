@@ -51,7 +51,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
       <button className="rm-start" disabled={!canStart} onClick={()=>void act('start',{venue,symbol,engine:engine!})}>13인 회의 시작</button>
       {openMeeting && !repeating && <button disabled={busy} onClick={()=>void act('cancel')}>진행 중인 회의 중지</button>}
     </div>
-    <p className="rm-help">{view && !view.officeReady?'사무실 탭에서 작업공간 설정을 마치세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
+    <p className="rm-help">{view && !view.officeReady?'회의 작업 폴더를 준비할 수 없습니다. 앱 데이터 폴더의 쓰기 권한을 확인하고 다시 여세요. ':''}{view && !view.engines.length?'로그인한 Claude Code 또는 Codex CLI가 필요합니다. ':''}회의 1회에 13개 역할이 엔진을 사용합니다. 강세 측 재반론을 포함해 총 14개 작업입니다.</p>
     {error && <p role="alert" className="rm-alert">{error}</p>}
     {m && <MeetingMarket meeting={m}/>}
     <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.currentFill??view?.trades.find(t=>t.id===m?.id)}/>

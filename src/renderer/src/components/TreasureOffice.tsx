@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { Headlines, Markets, PaperResults, PaperStatus, Venue } from '../../../shared/treasure';
-import { App } from '../App';
 import './treasure.css';
 import { TradingRoomPanel } from './TradingRoom';
+
+const StockOffice = import.meta.env.MODE === 'treasure' ? null : lazy(async () => {
+  const { App } = await import('../App');
+  return { default: App };
+});
 
 const names = { bithumb: '빗썸', bingx: '빙엑스' };
 const states: Record<string,string> = { stopped:'중지', running:'실행 중', starting:'시작 중', stopping:'중지 중', failed:'오류', unavailable:'모의 모드 확인 필요' };
@@ -107,18 +111,26 @@ function Desk({page,setPage}:{page:DeskPage;setPage:(p:DeskPage)=>void}) {
 
 export function TreasureOffice() {
   const [available,setAvailable] = useState<boolean>();
-  const [desk,setDesk] = useState(true);
   const [page,setPage] = useState<DeskPage>('room');
-  const [visited,setVisited] = useState(false);
-  useEffect(()=>{ void window.cth.treasureAvailable().then(setAvailable,()=>setAvailable(false)); },[]);
+  const [error,setError] = useState('');
+  useEffect(()=>{ void window.cth.treasureAvailable().then(setAvailable,e=>setError(message(e))); },[]);
+  useEffect(()=>{
+    if (!available) return;
+    return window.cth.onCloseRequested(()=>{
+      if (window.confirm('실행 중인 작업을 중지하고 통합판을 닫을까요?')) void window.cth.confirmClose();
+      else window.cth.cancelClose();
+    });
+  },[available]);
+  if (error) return <p role="alert">통합판을 열 수 없습니다. {error}</p>;
   if (available===undefined) return null;
-  if (!available) return <App/>;
+  if (!available) return StockOffice
+    ? <Suspense fallback={null}><StockOffice/></Suspense>
+    : <p role="alert">통합판에서 보물공방 엔진 파일을 찾을 수 없습니다. 실행 파일을 다시 열어 주세요.</p>;
   return <div className="tb-shell">
     <nav className="tb-switch" aria-label="작업 화면"><strong>Munder Difflin</strong>
-      <button aria-pressed={desk && page==='room'} onClick={()=>{setDesk(true);setPage('room');}}>트레이딩 사무실</button>
-      <button aria-pressed={desk && page!=='room'} onClick={()=>{setDesk(true);if(page==='room')setPage('markets');}}>보물공방</button>
-      <button aria-pressed={!desk} onClick={()=>{setDesk(false);setVisited(true);}}>사무실 관리</button></nav>
-    {desk && <Desk page={page} setPage={setPage}/>}
-    {visited && <div className="tb-office" hidden={desk}><App/></div>}
+      <button aria-pressed={page==='room'} onClick={()=>setPage('room')}>트레이딩 사무실</button>
+      <button aria-pressed={page!=='room'} onClick={()=>{if(page==='room')setPage('markets');}}>보물공방</button>
+    </nav>
+    <Desk page={page} setPage={setPage}/>
   </div>;
 }

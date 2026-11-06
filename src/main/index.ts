@@ -5387,6 +5387,12 @@ function onSystemResume(reason: string): void {
 const roomWorkers=new RoomWorkerPool(()=>hive.enabled()?hive.root():null,bin=>ptyManager.commandPath(bin),
   id=>{if(liveWorkers.has(id)){ptyManager.kill(id);teardownPty(id);}});
 app.whenReady().then(() => {
+  if (treasureEdition && !readConfig().harnessHome) {
+    const home=join(app.getPath('userData'),'trading-office');
+    const prepared=ensureHarnessHome(home);
+    if (prepared.ok) writeConfig({harnessHome:home});
+    else console.error('[trading-room] workspace setup failed:',prepared.error);
+  }
   registerTreasureDesk(liveWebContents,roomWorkers);
   // Realtime Michael mic-gate hygiene (rt-8 / Pam rt-10 nit): the voice session
   // opens the mic permission gate by persisting realtimeVoiceEnabled=true and
