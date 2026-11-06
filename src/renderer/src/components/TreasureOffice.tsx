@@ -10,7 +10,8 @@ const fmt = (n: number | null | undefined) => n == null ? '—' : n.toLocaleStri
 const when = (s: string) => new Date(s).toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'});
 const message = (e: unknown) => String(e instanceof Error ? e.message : e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
-function Desk() {
+type DeskPage = 'markets'|'news'|'results'|'room';
+function Desk({page,setPage}:{page:DeskPage;setPage:(p:DeskPage)=>void}) {
   const [status,setStatus] = useState<PaperStatus>();
   const [markets,setMarkets] = useState<Markets>();
   const [news,setNews] = useState<Headlines>();
@@ -22,7 +23,6 @@ function Desk() {
   const [term,setTerm] = useState('');
   const [offset,setOffset] = useState(0);
   const [revision,refresh] = useState(0);
-  const [page,setPage] = useState<'markets'|'news'|'results'|'room'>('markets');
   const [meetingSymbol,setMeetingSymbol] = useState('');
   const limit = 20;
 
@@ -69,19 +69,19 @@ function Desk() {
   const canControl = !!status && status.venues.every(v=>v.mode==='paper');
   const running = status?.venues.some(v=>['running','starting','stopping'].includes(v.state));
   const bothRunning = status?.venues.every(v=>['running','starting'].includes(v.state));
-  return <main className="tb-desk">
-    <header className="tb-head"><div><h1>보물공방</h1><p>빗썸 원화 현물 · 빙엑스 USDT 무기한선물</p></div>
-      {page!=='room' && <div className="tb-actions"><button disabled={!canControl || busy || bothRunning} onClick={()=>void control(true)}>전체 종목 모의 시작</button>
-      <button disabled={!canControl || busy || !running} onClick={()=>void control(false)}>모의 중지</button></div>}
-    </header>
+  return <main className={'tb-desk'+(page==='room'?' tb-trading':'')}>
+    {page!=='room' && <header className="tb-head"><div><h1>보물공방</h1><p>빗썸 원화 현물 · 빙엑스 USDT 무기한선물</p></div>
+      <div className="tb-actions"><button disabled={!canControl || busy || bothRunning} onClick={()=>void control(true)}>전체 종목 모의 시작</button>
+      <button disabled={!canControl || busy || !running} onClick={()=>void control(false)}>모의 중지</button></div>
+    </header>}
     {page!=='room' && <section className="tb-status" aria-label="모의매매 상태">{(['bithumb','bingx'] as const).map(v=>{
       const s=status?.venues.find(row=>row.venue===v);
       return <div key={v}><strong>{names[v]}</strong><span className={s?.state==='running'?'tb-running':''}>{s ? states[s.state] ?? s.state : '연결 중'}</span>
         <small>{s?.error || s?.profile || ''}</small></div>;
     })}</section>}
     {page!=='room' && (error || controlError) && <div role="alert" className="tb-error">{controlError || error} <button onClick={()=>refresh(n=>n+1)}>다시 조회</button></div>}
-    <nav className="tb-tabs" aria-label="보물공방 화면">{(['markets','news','results','room'] as const).map((key,i)=>
-      <button key={key} aria-pressed={page===key} onClick={()=>setPage(key)}>{['전체 시세','최신 뉴스','모의 장부','트레이딩 회의실'][i]}</button>)}</nav>
+    {page!=='room' && <nav className="tb-tabs" aria-label="보물공방 화면">{(['markets','news','results','room'] as const).map((key,i)=>
+      <button key={key} aria-pressed={page===key} onClick={()=>setPage(key)}>{['전체 시세','최신 뉴스','모의 장부','트레이딩 회의실'][i]}</button>)}</nav>}
     {page==='room' && <TradingRoomPanel initialVenue={venue} initialSymbol={meetingSymbol || (venue==='bithumb'?'KRW-BTC':'BTC-USDT')}/>}
     {page==='markets' && <>
       <div className="tb-filters"><select aria-label="거래소" value={venue} onChange={e=>{setOffset(0);setMeetingSymbol('');setVenue(e.target.value as Venue);}}>
@@ -108,13 +108,17 @@ function Desk() {
 export function TreasureOffice() {
   const [available,setAvailable] = useState<boolean>();
   const [desk,setDesk] = useState(true);
+  const [page,setPage] = useState<DeskPage>('room');
   const [visited,setVisited] = useState(false);
   useEffect(()=>{ void window.cth.treasureAvailable().then(setAvailable,()=>setAvailable(false)); },[]);
   if (available===undefined) return null;
   if (!available) return <App/>;
   return <div className="tb-shell">
-    <nav className="tb-switch" aria-label="작업 화면"><strong>Munder Difflin</strong><button aria-pressed={!desk} onClick={()=>{setDesk(false);setVisited(true);}}>사무실</button><button aria-pressed={desk} onClick={()=>setDesk(true)}>보물공방</button></nav>
-    {desk && <Desk/>}
+    <nav className="tb-switch" aria-label="작업 화면"><strong>Munder Difflin</strong>
+      <button aria-pressed={desk && page==='room'} onClick={()=>{setDesk(true);setPage('room');}}>트레이딩 사무실</button>
+      <button aria-pressed={desk && page!=='room'} onClick={()=>{setDesk(true);if(page==='room')setPage('markets');}}>보물공방</button>
+      <button aria-pressed={!desk} onClick={()=>{setDesk(false);setVisited(true);}}>사무실 관리</button></nav>
+    {desk && <Desk page={page} setPage={setPage}/>}
     {visited && <div className="tb-office" hidden={desk}><App/></div>}
   </div>;
 }

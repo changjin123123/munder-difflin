@@ -54,7 +54,8 @@ export class RoomWorkerPool implements RoomWorkers {
     const exe=this.codexPath();
     if (!exe) throw new Error('Codex 실행 파일이 없습니다.');
     const schema=join(cwd,'schema.json'), output=join(cwd,'answer.json');
-    const properties:Record<string,object>={verdict:{type:'string',enum:choices(job.step)},note:{type:'string'}};
+    const properties:Record<string,object>={verdict:{type:'string',enum:choices(job.step)},note:{type:'string'},
+      line:{type:'string'},replyTo:{type:['string','null']}};
     if (job.step==='trader') {
       properties.stopPct={type:['number','null']};
       properties.takePct={type:['number','null']};

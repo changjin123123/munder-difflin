@@ -22,7 +22,11 @@ export const rounds: Step[][] = [
   ['growth','defense','neutral'],['trader'],['audit'],['manager']
 ];
 export const roleFor = (step: Step): Role => step==='reply' ? 'bull' : step;
-export interface Answer { verdict: string; note: string; stopPct?: number; takePct?: number }
+export const castNames: Record<Role,string> = {
+  technical:'짐', fundamental:'오스카', news:'켈리', sentiment:'팸', bull:'앤디', bear:'드와이트',
+  chair:'스탠리', growth:'라이언', defense:'앤절라', neutral:'토비', trader:'필리스', audit:'케빈', manager:'마이클'
+};
+export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number }
 export interface Quote { bid: number; ask: number; at: number; until: number }
 export interface Evidence { venue: Venue; symbol: string; captured: number; quote: Quote;
   sources: Record<string,unknown>; missing: string[] }
