@@ -2,7 +2,7 @@ import type { Venue } from './treasure';
 export const seats = [
   ['technical','기술 분석','jim','EMA·RSI·MACD·볼린저 밴드와 확정봉을 해석한다.'],
   ['fundamental','펀더멘털','oscar','프로젝트 식별자, 시가총액과 공급량의 한계까지 분석한다.'],
-  ['news','뉴스 감성','kelly','제공된 기사 제목에서 종목 관련성, 시각, 상반된 근거를 확인한다.'],
+  ['news','뉴스 분석','kelly','기사 발행 시각과 출처를 확인하고 같은 사건의 후속·중복 보도를 묶는다. 종목 직접 보도와 거시 배경을 구분한다.'],
   ['sentiment','시장 심리','pam','시장 전체 심리와 해당 코인의 움직임을 구분한다.'],
   ['bull','강세 연구원','andy','상승 가설과 그 가설이 깨지는 조건을 제시한다. 반론 단계에서는 약세 측 논거를 직접 반박한다.'],
   ['bear','약세 연구원','dwight','강세 측 근거를 인용해 반박하고 하락 가설이 틀릴 조건을 제시한다.'],
@@ -26,10 +26,14 @@ export const castNames: Record<Role,string> = {
   technical:'짐', fundamental:'오스카', news:'켈리', sentiment:'팸', bull:'앤디', bear:'드와이트',
   chair:'스탠리', growth:'라이언', defense:'앤절라', neutral:'토비', trader:'필리스', audit:'케빈', manager:'마이클'
 };
-export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number }
+export interface NewsItem { id:string; source:string; publishedAt:number; title:string; url:string; summary:string; scope:'asset'|'market' }
+export interface NewsEvent { summary:string; newsRefs:string[] }
+export const newsDebaters = ['bull','bear','reply','chair','audit','manager'] as const;
+export function citesNews(step:Step) { return newsDebaters.some(s=>s===step); }
+export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number; newsEvents?:NewsEvent[]; newsRefs?:string[] }
 export interface Quote { bid: number; ask: number; at: number; until: number }
 export interface Evidence { venue: Venue; symbol: string; captured: number; quote: Quote;
-  sources: Record<string,unknown>; missing: string[] }
+  sources: Record<string,unknown>; missing: string[]; news?:NewsItem[] }
 export interface Meeting {
   id: string; venue: Venue; symbol: string; engine: Engine; created: number;
   state: 'active'|'approved'|'hold'|'error'|'cancelled'; reason: string;

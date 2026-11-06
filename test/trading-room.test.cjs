@@ -14,7 +14,12 @@ function fixture(options={}) {
   const steps=[];
   const quote=()=>({bid:market,ask:market+.02,at:Date.now()/1000,until:Date.now()/1000+8});
   const source=async(path,{venue,symbol})=>{
-    if (path==='room/evidence') return {venue,symbol,captured:Date.now()/1000,quote:quote(),sources:{technical:{}},missing:[]};
+    if (path==='room/evidence') {
+      const news=options.noNews?[]:['N1','N2'].map((id,i)=>({id,source:'CoinDesk',title:'합성 테스트 '+id,
+        url:options.badUrl?'https://coindesk.com.example.org/a':'https://www.coindesk.com/test/'+i,
+        summary:'공개 요약 테스트',scope:'asset',publishedAt:Date.now()/1000-(options.staleNews?86401:60)}));
+      return {venue,symbol,captured:Date.now()/1000,quote:quote(),sources:{technical:{}},missing:[],news};
+    }
     if (path==='room/entry' && options.expired) return {...quote(),until:0};
     return quote();
   };
@@ -22,7 +27,9 @@ function fixture(options={}) {
     steps.push(step);
     if (step===options.malformed) return '{}';
     const review=['growth','defense','neutral','audit'].includes(step);
-    return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2});
+    return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2,
+      newsRefs:step===options.badCitation?['N99']:['N1'],newsEvents:options.emptyBrief?[]:[{summary:'동일 사건의 두 보도',newsRefs:['N1','N2']},
+        {summary:'중복 후속보도',newsRefs:['N1']}]});
   }};
   const room=new TradingRoom(':memory:',source,workers);
   async function run(venue='bingx'){
@@ -54,6 +61,18 @@ roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create
     const f=fixture(opts);t.after(()=>f.room.stop());
     const v=await f.run(venue);
     assert.equal(v.current.state,state);assert.equal(v.trades.length,0);
+  }
+});
+roomTest('a paper entry needs fresh source-linked events and a cited debate through manager approval',async t=>{
+  for (const options of [{},{noNews:true},{badUrl:true},{staleNews:true},{emptyBrief:true},
+    {badCitation:'bull'},{badCitation:'bear'},{badCitation:'reply'},{badCitation:'audit'},{badCitation:'manager'}]) {
+    const f=fixture(options);t.after(()=>f.room.stop());
+    const view=await f.run();
+    assert.equal(Object.keys(view.current.answers).length,14);
+    const valid=!Object.keys(options).length;
+    assert.equal(view.current.state,valid?'approved':'hold');
+    assert.equal(view.trades.length,valid?1:0);
+    if (valid) assert.deepEqual(view.current.answers.news.newsEvents,[{summary:'동일 사건의 두 보도',newsRefs:['N1','N2']}]);
   }
 });
 roomTest('BingX paper short closes on the ask with spread, fees and slippage',async t=>{

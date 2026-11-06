@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { basename, isAbsolute, join } from 'node:path';
-import { roleFor, seats, type Engine, type Step } from '../shared/tradingRoom';
+import { citesNews, roleFor, seats, type Engine, type Step } from '../shared/tradingRoom';
 import { choices, type RoomWorkers } from './tradingRoom';
 
 interface Job {run:string; step:Step; engine:Engine; objective:string; queued:boolean; child?:ChildProcess;
@@ -56,6 +56,10 @@ export class RoomWorkerPool implements RoomWorkers {
     const schema=join(cwd,'schema.json'), output=join(cwd,'answer.json');
     const properties:Record<string,object>={verdict:{type:'string',enum:choices(job.step)},note:{type:'string'},
       line:{type:'string'},replyTo:{type:['string','null']}};
+    const newsRefs={type:'array',items:{type:'string'}};
+    if (citesNews(job.step)) properties.newsRefs=newsRefs;
+    if (job.step==='news') properties.newsEvents={type:'array',items:{type:'object',
+      properties:{summary:{type:'string'},newsRefs},required:['summary','newsRefs'],additionalProperties:false}};
     if (job.step==='trader') {
       properties.stopPct={type:['number','null']};
       properties.takePct={type:['number','null']};

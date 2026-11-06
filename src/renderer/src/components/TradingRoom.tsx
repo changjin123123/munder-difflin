@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { seats, rounds, repeatLimits, repeatMinutes, type Engine, type RoomView } from '../../../shared/tradingRoom';
 import type { Venue } from '../../../shared/treasure';
 import { TradingOffice } from './TradingOffice';
+import { MeetingNews } from './MeetingNews';
 import './tradingRoom.css';
 
 const labels:Record<string,string>={active:'회의 중',approved:'모의 체결',hold:'관망',error:'중단',cancelled:'취소',LONG:'매수',SHORT:'매도·숏',HOLD:'관망',PASS:'통과',VETO:'기각'};
@@ -44,6 +45,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
     <header><div><h2>트레이딩 사무실</h2></div>
       <select aria-label="회의 기록" value={history} onChange={e=>setHistory(e.target.value)}><option value="">현재 회의</option>{view?.history.map(r=><option key={r.id} value={r.id}>{clock(r.created)} · {r.symbol} · {labels[r.state]}</option>)}</select></header>
     <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.trades.find(t=>t.id===m?.id)}/>
+    {m && <MeetingNews meeting={m}/>}
     <div className="rm-controls">
       <label>거래소<select value={venue} onChange={e=>{const v=e.target.value as Venue;setVenue(v);setSymbol(v==='bithumb'?'KRW-BTC':'BTC-USDT');}}><option value="bithumb">빗썸 현물</option><option value="bingx">빙엑스 선물</option></select></label>
       <label>종목<input aria-label="회의 종목" maxLength={40} value={symbol} onChange={e=>setSymbol(e.target.value.trim().toUpperCase())}/></label>
@@ -73,7 +75,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
       <svg viewBox="0 0 300 45" role="img" aria-label="최근 32개 확정봉 종가 추이"><polyline fill="none" stroke="currentColor" strokeWidth="2" points={closes.map((p,i)=>i*300/(closes.length-1)+','+(42-39*(p-low)/(high-low||1))).join(' ')}/></svg></div>}
     {m?.evidence && <details><summary>회의에서 사용한 시세와 자료</summary>
       <p>{clock(m.evidence.captured*1000)} · {venueName(m.venue)} 매수 1호가 {cash(m.evidence.quote.bid,currency(m.venue))} · 매도 1호가 {cash(m.evidence.quote.ask,currency(m.venue))}</p>
-      <p>출처는 거래소 15분 확정봉, CoinGecko 프로젝트 지표, Alternative.me 비트코인 심리지수와 아래 뉴스입니다. 누락된 자료 {m.evidence.missing.join(', ') || '없음'}</p>
+      <p>출처는 거래소 15분 확정봉, CoinGecko 프로젝트 지표, Alternative.me 비트코인 심리지수, 블록미디어와 CoinDesk입니다. 누락된 자료 {m.evidence.missing.join(', ') || '없음'}</p>
       {['블록미디어','CoinDesk'].map(source=><div key={source}>{((m.evidence!.sources[source]??[]) as [number,string,string][]).map(([stamp,title,url])=>
         <p key={url}><small>{source} · {clock(stamp*1000)}</small> <a href={url} target="_blank" rel="noreferrer">{title}</a></p>)}</div>)}
     </details>}

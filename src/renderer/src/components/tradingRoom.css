@@ -3,3 +3,9 @@
 .rm-auto{margin:16px 0;padding:14px;background:#1b2c2a;border:1px solid #47584b;border-radius:5px}
 .rm-auto .rm-controls{margin:6px 0}.rm-auto-result{display:grid;gap:4px;margin-top:10px}
 .rm-auto-result b{color:#eed588}.rm-auto-result span{font-size:13px}.rm-auto-result button{margin:4px 5px 0 0}
+.rm-news{margin:16px 0;border-block:1px solid #50645c;padding:16px 0;font-size:14px}
+.rm-news-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.rm-news ul{padding-left:22px;line-height:1.6}
+.rm-news li+li,.rm-news article+article{margin-top:10px}.rm-news-turn{display:grid;grid-template-columns:minmax(90px,auto) 1fr;gap:12px;padding:6px 0}
+.rm-news-turn b{color:#eed588}.rm-news details{margin-top:12px}.rm-news article{margin-top:8px}.rm-news article>a,.rm-news article>small{display:block}
+.rm-news a,.rm-citations a{color:#b4e4c6}.rm-citations{display:inline-flex;flex-wrap:wrap;gap:6px}
+.rm-citations a{font-size:11px;text-decoration:underline;text-underline-offset:2px;padding:1px 4px}

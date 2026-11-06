@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { seats, roleFor, castNames, type Meeting, type Step, type Fill, type Role } from '../../../shared/tradingRoom';
 import { TradingOfficeMap } from './TradingOfficeMap';
+import { NewsRefs } from './MeetingNews';
 import { SpritePortrait } from './SpritePortrait';
 import './tradingOffice.css';
 
@@ -64,10 +65,12 @@ export function TradingOffice({meeting:m,fill}:{meeting?:Meeting|null;fill?:Fill
         {visibleAnswer && step && !complete ? <>
           {visibleAnswer.replyTo && <small className="tf-to">{castNames[roleFor(visibleAnswer.replyTo)]}에게 답변</small>}
           <p className="tf-quote" aria-live="polite">{statement}</p>
+          <NewsRefs items={m?.evidence?.news} refs={step==='news'?visibleAnswer.newsEvents?.flatMap(e=>e.newsRefs):visibleAnswer.newsRefs}/>
           <details className="tf-full" key={step}><summary>발언 전문</summary><p>{visibleAnswer.note}</p></details>
         </> : complete && !inspected ? <div className="tf-decision"><h3>{result}</h3>
           <p>{m.reason}</p>
           {m.answers.manager && <p>마이클 · {excerpt(m.answers.manager.line||m.answers.manager.note,130)}</p>}
+          <NewsRefs items={m.evidence?.news} refs={m.answers.manager?.newsRefs}/>
           {fill && <p>{fill.side} · 모의 진입 {fill.entry.toLocaleString('ko-KR',{maximumFractionDigits:8})} {m.venue==='bingx'?'USDT':'KRW'}</p>}
           {m.state==='hold' && <strong>이 회의의 신규 모의 체결 0건</strong>}
           </div> : <p className="tf-wait">{inspected?castNames[inspected]+'의 발언이 아직 없습니다.':
