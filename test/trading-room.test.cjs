@@ -12,6 +12,7 @@ const roomTest = (name, fn) => test(name,{skip:nativeAvailable?false:'Use the bu
 function fixture(options={}) {
   let market=100;
   const steps=[];
+  const objectives={};
   const quote=()=>({bid:market,ask:market+.02,at:Date.now()/1000,until:Date.now()/1000+8});
   const source=async(path,{venue,symbol})=>{
     if (path==='room/evidence') {
@@ -23,8 +24,9 @@ function fixture(options={}) {
     if (path==='room/entry' && options.expired) return {...quote(),until:0};
     return quote();
   };
-  const workers={engines:()=>['codex'],ready:()=>true,cancel:()=>{},ask:async(id,step)=>{
+  const workers={engines:()=>['codex'],ready:()=>true,cancel:()=>{},ask:async(id,step,engine,objective)=>{
     steps.push(step);
+    objectives[step]=objective;
     if (step===options.malformed) return '{}';
     const review=['growth','defense','neutral','audit'].includes(step);
     return JSON.stringify({note:'독립된 합성 검증 자료',verdict:review?(step===options.veto?'VETO':'PASS'):(options.side||'LONG'),stopPct:1,takePct:2,
@@ -37,7 +39,7 @@ function fixture(options={}) {
     for(let i=0;i<40 && room.view().current.state==='active';i++) await delay(2);
     return room.view();
   }
-  return {room,run,steps,setPrice:v=>{market=v}};
+  return {room,run,steps,objectives,setPrice:v=>{market=v}};
 }
 roomTest('13 seats, a real rebuttal stage, isolated paper balances and exactly-once closing',async t=>{
   const f=fixture();t.after(()=>f.room.stop());
@@ -62,6 +64,27 @@ roomTest('risk veto, invalid output, stale quotes, and spot shorts cannot create
     const v=await f.run(venue);
     assert.equal(v.current.state,state);assert.equal(v.trades.length,0);
   }
+});
+roomTest('each risk reviewer sees the trader proposal and earlier reviews before the manager decides',async t=>{
+  const f=fixture();t.after(()=>f.room.stop());
+  const view=await f.run();
+  const i=f.steps.indexOf('trader');
+  assert.deepEqual(f.steps.slice(i),['trader','growth','defense','neutral','audit','manager']);
+  const plan=view.current.proposal;
+  assert.equal(plan.side,'LONG');
+  for(const field of ['entry','stop','take']) assert.equal(plan[field],view.trades[0][field]);
+  for(const [idx,role] of f.steps.slice(i+1).entries()) {
+    const prompt=f.objectives[role];
+    assert.ok(prompt.includes(JSON.stringify(plan)));
+    const previous=JSON.parse(prompt.split('\n').find(line=>line.startsWith('이전 역할 의견 ')).slice('이전 역할 의견 '.length));
+    assert.ok(previous.trader);
+    assert.ok(f.steps.slice(i,i+idx+1).every(step=>previous[step]));
+    assert.equal(previous[role],undefined);
+  }
+  const hold=fixture({side:'HOLD'});t.after(()=>hold.room.stop());
+  const held=await hold.run();
+  assert.deepEqual(held.current.proposal,{side:'HOLD'});
+  assert.equal(held.trades.length,0);
 });
 roomTest('a paper entry needs fresh source-linked events and a cited debate through manager approval',async t=>{
   for (const options of [{},{noNews:true},{badUrl:true},{staleNews:true},{emptyBrief:true},

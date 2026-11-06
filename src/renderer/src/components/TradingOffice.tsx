@@ -7,7 +7,7 @@ import './tradingOffice.css';
 
 const vote:Record<string,string>={LONG:'매수',SHORT:'숏',HOLD:'관망',VETO:'기각',PASS:'통과'};
 const phase=(s:Step)=>['technical','news','sentiment','fundamental'].includes(s)?'시장 분석':
-  ['bull','bear','reply','chair'].includes(s)?'강세·약세 토론':['growth','neutral','defense'].includes(s)?'리스크 심사':'최종 결정';
+  ['bull','bear','reply','chair'].includes(s)?'강세·약세 토론':s==='trader'?'거래 계획':['growth','neutral','defense'].includes(s)?'리스크 심사':'최종 결정';
 const chairFor=(s:Step)=>seats.find(r=>r[0]===roleFor(s))!;
 
 // Earlier meetings contain the original note but no short spoken version.

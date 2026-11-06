@@ -9,3 +9,4 @@
 .rm-news-turn b{color:#eed588}.rm-news details{margin-top:12px}.rm-news article{margin-top:8px}.rm-news article>a,.rm-news article>small{display:block}
 .rm-news a,.rm-citations a{color:#b4e4c6}.rm-citations{display:inline-flex;flex-wrap:wrap;gap:6px}
 .rm-citations a{font-size:11px;text-decoration:underline;text-underline-offset:2px;padding:1px 4px}
+.rm-review{margin:14px 0;border-left:3px solid #8fba9e;padding:4px 14px}.rm-review p{font-size:13px;margin:6px 0}

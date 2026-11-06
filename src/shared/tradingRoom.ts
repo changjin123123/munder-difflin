@@ -19,7 +19,7 @@ export type Engine = 'claude' | 'codex';
 export type Step = Role | 'reply';
 export const rounds: Step[][] = [
   ['technical','fundamental','news','sentiment'],['bull'],['bear'],['reply'],['chair'],
-  ['growth','defense','neutral'],['trader'],['audit'],['manager']
+  ['trader'],['growth'],['defense'],['neutral'],['audit'],['manager']
 ];
 export const roleFor = (step: Step): Role => step==='reply' ? 'bull' : step;
 export const castNames: Record<Role,string> = {
@@ -32,6 +32,7 @@ export const newsDebaters = ['bull','bear','reply','chair','audit','manager'] as
 export function citesNews(step:Step) { return newsDebaters.some(s=>s===step); }
 export interface Answer { verdict: string; note: string; line?: string; replyTo?: Step; stopPct?: number; takePct?: number; newsEvents?:NewsEvent[]; newsRefs?:string[] }
 export interface Quote { bid: number; ask: number; at: number; until: number }
+export type Proposal = {side:'HOLD'} | {side:'LONG'|'SHORT'; entry:number; stop:number; take:number; amount:number};
 export interface Evidence { venue: Venue; symbol: string; captured: number; quote: Quote;
   sources: Record<string,unknown>; missing: string[]; news?:NewsItem[] }
 export interface Meeting {
@@ -39,6 +40,7 @@ export interface Meeting {
   state: 'active'|'approved'|'hold'|'error'|'cancelled'; reason: string;
   evidence?: Evidence; speaking: Step[]; answers: Partial<Record<Step,Answer>>;
   sessionId?:string; finishedAt?:number;
+  method?:'tradingagents-office-v1'; proposal?:Proposal;
 }
 export const repeatMinutes = [5,15,30,60] as const;
 export const repeatLimits = [2,3,4,6] as const;

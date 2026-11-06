@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { seats, rounds, roleFor, castNames, type Answer, type Engine, type Evidence, type Fill,
-  repeatLimits, repeatMinutes, type PaperSession, type Meeting, type Quote, type RoomView, type Step } from '../shared/tradingRoom';
+  repeatLimits, repeatMinutes, type PaperSession, type Meeting, type Proposal, type Quote, type RoomView, type Step } from '../shared/tradingRoom';
 import type { Venue } from '../shared/treasure';
 import { collectNews, newsHoldReason, newsInstruction, recordNews } from './meetingNews';
 
@@ -39,6 +39,13 @@ function quoteOk(q:Quote) {
   const now=Date.now()/1000;
   return q && [q.bid,q.ask,q.at,q.until].every(Number.isFinite) && q.bid>0 && q.ask>=q.bid &&
     q.at<=now+2 && q.until>=now && now-q.at<=12 && q.until<=q.at+12;
+}
+function priceProposal(venue:Venue, answer:Answer, quote:Quote):Proposal {
+  if (answer.verdict!=='LONG' && answer.verdict!=='SHORT') return {side:'HOLD'};
+  const sign=answer.verdict==='LONG'?1:-1;
+  const entry=sign===1?quote.ask*(1+slip):quote.bid*(1-slip);
+  return {side:answer.verdict,entry,amount:funds(venue)/10,
+    stop:entry*(1-sign*answer.stopPct!/100),take:entry*(1+sign*answer.takePct!/100)};
 }
 function decision(m:Meeting): string|undefined {
   if (!m.evidence?.sources.technical) return '최근 확정봉 자료 부족';
@@ -150,7 +157,7 @@ export class TradingRoom {
     if (!this.workers.engines().includes(engine)) throw new Error('선택한 사무실 엔진을 설치하고 로그인하세요.');
     if (this.current?.state==='active') throw new Error('이미 회의가 진행 중입니다.');
     if (!(venue==='bithumb'?/^KRW-[A-Z0-9]{1,30}$/:venue==='bingx'?/^[A-Z0-9]{1,30}-USDT$/:/^(?!)$/).test(symbol)) throw new Error('거래소 종목을 확인하세요.');
-    const m:Meeting={id:randomUUID(),created:Date.now(),venue,symbol,engine,state:'active',reason:'공개 자료 수집 중',speaking:[],answers:{}};
+    const m:Meeting={id:randomUUID(),created:Date.now(),venue,symbol,engine,method:'tradingagents-office-v1',state:'active',reason:'공개 자료 수집 중',speaking:[],answers:{}};
     if(s){m.sessionId=s.id;s.meetings.push(m.id);s.state='running';s.nextAt=null;s.reason='회의 진행 중';}
     this.db.transaction(()=>{this.save(m);if(s)this.saveSession(s);})();
     if(s)this.session=s;
@@ -185,7 +192,8 @@ export class TradingRoom {
             '1배 모의 장부. 빗썸은 현물 LONG만, 빙엑스는 LONG/SHORT. 이번 거래소의 1회 모의 진입액은 '+
               (m.venue==='bingx'?'100 USDT':'100,000 KRW')+'이고, 편도 모의 수수료 '+(fee(m.venue)*100)+
               '%, 체결마다 불리한 방향으로 슬리피지 '+(slip*100)+'%를 반영한다. 펀딩비·강제청산 미반영. 이들은 시뮬레이션 가정이다.',
-            '리스크 단계에서는 의장의 방향이 신규 진입을 검토할 만한지 심사한다. 의장이 HOLD이면 모의 진입도 보류된다. 구체적인 손절·익절 계획은 뒤의 트레이더가 작성하고 검증자가 독립 검토한다.',
+            '의장 토론 결론을 읽은 트레이더가 먼저 모의 거래 계획을 작성한다. 이후 공격적·보수적·중립 심사역이 차례로 같은 계획과 앞선 심사를 검토한다. 위험·비용과 계획의 손절·익절을 대조해 구체적으로 찬반을 말하고 수정이 필요하면 VETO로 보류한다. 트레이더 제안이 HOLD이면 진입 계획은 없다. 검증 뒤 매니저가 각 심사 의견을 근거로 최종 결정한다. 의장·트레이더가 관망하거나 심사 한 명이라도 기각하면 신규 모의 진입은 없다.',
+            m.proposal?'필리스의 구조화된 제안 (최초 호가 기준 예상치) '+JSON.stringify(m.proposal):'',
             '완료 메시지 body에 JSON 문자열 하나만 반환. verdict 허용값 '+choices(step).join('/')+'; note에는 자료 근거와 반대 조건을 최대 500자로 기록.',
             step==='trader'?'진입 방향이면 stopPct (0.3~5), takePct (stopPct~15)를 숫자로 포함. 진입 예상가는 기준 호가, 최종 체결가는 승인 시의 새 호가.':''
           ].join('\n');
@@ -195,6 +203,7 @@ export class TradingRoom {
             const answer=parseAnswer(body,step,ev);
             if (answer.replyTo && !Object.hasOwn(previous,answer.replyTo)) delete answer.replyTo;
             m.answers[step]=answer;
+            if (step==='trader') m.proposal=priceProposal(m.venue,answer,ev.quote);
           } catch {throw new Error(seat[1]+'의 완료 응답을 검증하지 못했습니다.');}
           m.speaking=m.speaking.filter(s=>s!==step); this.save(m);
         }));
@@ -215,16 +224,16 @@ export class TradingRoom {
         Math.abs((q.bid+q.ask)/2/original-1)>.02 || q.ask/q.bid>1.01) {
       this.finish(m,'hold','승인 시점의 시세·스프레드·자료 유효기간 조건 미충족');return;
     }
-    const side=m.answers.manager!.verdict, sign=side==='LONG'?1:-1;
-    const entry=side==='LONG'?q.ask*(1+slip):q.bid*(1-slip);
-    const amount=funds(m.venue)/10, plan=m.answers.trader!;
+    const plan=priceProposal(m.venue,m.answers.trader!,q);
+    if (plan.side==='HOLD') {this.finish(m,'hold','트레이더가 관망을 제안했습니다.');return;}
+    const {side,entry,amount,stop,take}=plan;
     this.db.transaction(()=>{
       if (this.totals(m.venue).cash<amount*(1+fee(m.venue)) ||
           this.db.prepare('SELECT id FROM trades WHERE venue=? AND symbol=? AND closed IS NULL').get(m.venue,m.symbol)) {
         this.finish(m,'hold','가용 모의 자금 부족 또는 같은 종목 보유 중');return;
       }
       this.db.prepare('INSERT INTO trades(id,venue,symbol,side,entry,qty,stop,take,opened) VALUES(?,?,?,?,?,?,?,?,?)')
-        .run(m.id,m.venue,m.symbol,side,entry,amount/entry,entry*(1-sign*plan.stopPct!/100),entry*(1+sign*plan.takePct!/100),Date.now());
+        .run(m.id,m.venue,m.symbol,side,entry,amount/entry,stop,take,Date.now());
       this.finish(m,'approved','최종 승인 · 새 호가로 회의 전용 장부에 모의 체결');
     })();
   }

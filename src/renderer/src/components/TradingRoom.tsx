@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { seats, rounds, repeatLimits, repeatMinutes, type Engine, type RoomView } from '../../../shared/tradingRoom';
+import { castNames, seats, repeatLimits, repeatMinutes, type Engine, type RoomView, type Step } from '../../../shared/tradingRoom';
 import type { Venue } from '../../../shared/treasure';
 import { TradingOffice } from './TradingOffice';
 import { MeetingNews } from './MeetingNews';
@@ -46,6 +46,15 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
       <select aria-label="회의 기록" value={history} onChange={e=>setHistory(e.target.value)}><option value="">현재 회의</option>{view?.history.map(r=><option key={r.id} value={r.id}>{clock(r.created)} · {r.symbol} · {labels[r.state]}</option>)}</select></header>
     <TradingOffice key={m?.id??'empty'} meeting={m} fill={view?.trades.find(t=>t.id===m?.id)}/>
     {m && <MeetingNews meeting={m}/>}
+    {m?.method==='tradingagents-office-v1' && m.proposal && <section className="rm-review" aria-label="거래 계획과 심사">
+      <h3>필리스의 거래 계획과 3인 심사</h3>
+      <p>{m.proposal.side==='HOLD'?'필리스가 신규 진입을 보류했습니다.':
+        labels[m.proposal.side]+' · 제안 시점 예상 진입 '+cash(m.proposal.entry,currency(m.venue))+' · 손절 '+cash(m.proposal.stop,currency(m.venue))+' · 익절 '+cash(m.proposal.take,currency(m.venue))}</p>
+      {(['growth','defense','neutral','audit','manager'] as const).map(step=>{
+        const a=m.answers[step];
+        return a && <p key={step}><b>{castNames[step]} · {seats.find(s=>s[0]===step)![1]} · {labels[a.verdict]}</b> {a.line||a.note}</p>;
+      })}
+    </section>}
     <div className="rm-controls">
       <label>거래소<select value={venue} onChange={e=>{const v=e.target.value as Venue;setVenue(v);setSymbol(v==='bithumb'?'KRW-BTC':'BTC-USDT');}}><option value="bithumb">빗썸 현물</option><option value="bingx">빙엑스 선물</option></select></label>
       <label>종목<input aria-label="회의 종목" maxLength={40} value={symbol} onChange={e=>setSymbol(e.target.value.trim().toUpperCase())}/></label>
@@ -80,7 +89,7 @@ export function TradingRoomPanel({initialVenue,initialSymbol}:{initialVenue:Venu
         <p key={url}><small>{source} · {clock(stamp*1000)}</small> <a href={url} target="_blank" rel="noreferrer">{title}</a></p>)}</div>)}
     </details>}
     {m && <details><summary>전체 분석 보고서 · 응답 {Object.keys(m.answers).length}/14</summary>
-      {rounds.flat().filter(s=>m.answers[s]).map(s=><p key={s}><b>{s==='reply'?'강세 재반론':seats.find(r=>r[0]===s)?.[1]}</b> · {labels[m.answers[s]!.verdict]} · {m.answers[s]!.note}
+      {(Object.keys(m.answers) as Step[]).map(s=><p key={s}><b>{s==='reply'?'강세 재반론':seats.find(r=>r[0]===s)?.[1]}</b> · {labels[m.answers[s]!.verdict]} · {m.answers[s]!.note}
         {s==='trader' && m.answers[s]?.stopPct!=null && <small> · 손절 {m.answers[s]!.stopPct}% / 익절 {m.answers[s]!.takePct}%</small>}</p>)}
     </details>}
     <section className="rm-ledger"><h3>회의 전용 모의 장부</h3><p>1배 단일 진입 · 편도 수수료 빗썸 0.25%, 빙엑스 0.05% · 슬리피지 0.03%. 펀딩비 미반영. 앱 실행 중 관측한 호가로 익절·손절합니다.</p>
